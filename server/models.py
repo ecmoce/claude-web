@@ -6,6 +6,7 @@ class ChatRequest(BaseModel):
     """채팅 요청 모델."""
     message: str = Field(..., min_length=1, max_length=10000, description="사용자 메시지")
     file_ids: list[str] | None = Field(None, description="첨부 파일 ID 목록")
+    conversation_id: str | None = Field(None, description="대화 ID")
 
 
 class ChatResponse(BaseModel):
@@ -24,4 +25,4 @@ class UserInfo(BaseModel):
 class HealthResponse(BaseModel):
     """헬스체크 응답."""
     status: str = "ok"
-    version: str = "0.2.0"
+    version: str = "0.3.0"

@@ -1,9 +1,7 @@
 /**
- * Claude Web Gateway — 클라이언트 앱 v2
- * 사이드바, 대화 히스토리, 모델 설정, WebSocket 스트리밍
+ * Claude Web Gateway — 클라이언트 앱 v3 (서버 SQLite 저장소)
  */
 (() => {
-  // ── DOM ──────────────────────────────────────
   const $ = id => document.getElementById(id);
   const loginScreen = $('login-screen');
   const app = $('app');
@@ -21,7 +19,6 @@
   const modelSelect = $('model-select');
   const settingsModal = $('settings-modal');
   const sidebar = $('sidebar');
-  const welcome = $('welcome');
 
   const attachBtn = $('attach-btn');
   const fileInput = $('file-input');
@@ -31,12 +28,11 @@
   let isStreaming = false;
   let currentMsgEl = null;
   let streamBuffer = '';
-  let conversations = {};
+  let conversations = []; // [{id, title, created_at, updated_at}]
   let activeConvId = null;
   let currentModel = 'opus';
-  let pendingFiles = []; // {file_id, filename, size, is_image}
+  let pendingFiles = [];
 
-  // marked 설정
   marked.setOptions({
     highlight: (code, lang) => {
       if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
@@ -50,7 +46,7 @@
     try {
       const r = await fetch('/api/me');
       const d = await r.json();
-      if (d.authenticated) { showApp(d.username, d.dev_mode); }
+      if (d.authenticated) showApp(d.username, d.dev_mode);
       else showLogin();
     } catch { showLogin(); }
   }
@@ -62,31 +58,56 @@
     app.classList.remove('hidden');
     userAvatar.textContent = username[0].toUpperCase();
     userName.textContent = devMode ? '🔧 DEV' : `@${username}`;
-    loadHistory();
+    loadConversations();
     connectWS();
   }
 
-  // ── CONVERSATIONS ───────────────────────────
+  // ── CONVERSATIONS (서버 API) ─────────────────
   function newConvId() { return 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
+
+  async function loadConversations() {
+    try {
+      const r = await fetch('/api/conversations');
+      const d = await r.json();
+      conversations = d.conversations || [];
+    } catch { conversations = []; }
+
+    if (!activeConvId && conversations.length) {
+      activeConvId = conversations[0].id;
+    }
+    renderConvList();
+    if (activeConvId) await loadMessages(activeConvId);
+    else renderMessages([]);
+  }
+
+  async function loadMessages(convId) {
+    try {
+      const r = await fetch(`/api/conversations/${convId}/messages`);
+      const d = await r.json();
+      renderMessages(d.messages || []);
+    } catch {
+      renderMessages([]);
+    }
+  }
 
   function createConversation() {
     const id = newConvId();
-    conversations[id] = { id, title: '새 대화', messages: [], created: Date.now() };
     activeConvId = id;
+    // Will be created on server when first message is sent
     renderConvList();
-    renderMessages();
+    renderMessages([]);
     return id;
   }
 
   function renderConvList() {
-    const sorted = Object.values(conversations).sort((a, b) => b.created - a.created);
+    const sorted = [...conversations].sort((a, b) => b.updated_at - a.updated_at);
     const today = new Date().toDateString();
     const yesterday = new Date(Date.now() - 86400000).toDateString();
 
     let html = '';
     let lastSection = '';
     sorted.forEach(c => {
-      const d = new Date(c.created);
+      const d = new Date(c.created_at * 1000);
       const section = d.toDateString() === today ? '오늘' : d.toDateString() === yesterday ? '어제' : d.toLocaleDateString('ko-KR');
       if (section !== lastSection) { html += `<div class="conv-section">${section}</div>`; lastSection = section; }
       const time = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
@@ -102,37 +123,42 @@
     convList.innerHTML = html;
   }
 
-  function switchConversation(id) {
-    if (!conversations[id]) return;
+  async function switchConversation(id) {
     activeConvId = id;
     renderConvList();
-    renderMessages();
+    await loadMessages(id);
   }
 
-  function deleteConversation(id) {
-    delete conversations[id];
+  async function deleteConversationById(id) {
+    try { await fetch(`/api/conversations/${id}`, { method: 'DELETE' }); } catch {}
+    conversations = conversations.filter(c => c.id !== id);
     if (activeConvId === id) {
-      const keys = Object.keys(conversations);
-      activeConvId = keys.length ? keys[keys.length - 1] : null;
+      activeConvId = conversations.length ? conversations[0].id : null;
     }
-    saveConversations();
     renderConvList();
-    renderMessages();
+    if (activeConvId) await loadMessages(activeConvId);
+    else renderMessages([]);
   }
 
-  function renderMessages() {
+  function renderMessages(msgs) {
     messages.innerHTML = '';
-    if (!activeConvId || !conversations[activeConvId]) {
+    if (!msgs || !msgs.length) {
       messages.innerHTML = getWelcomeHTML();
       return;
     }
-    const conv = conversations[activeConvId];
-    if (!conv.messages.length) {
-      messages.innerHTML = getWelcomeHTML();
-      return;
-    }
-    conv.messages.forEach(m => addMessageEl(m.role, m.content, m.time, m.elapsed, m.files));
+    msgs.forEach(m => {
+      const files = (m.files || []).map(f => ({
+        file_id: f.id || f.filename,
+        filename: f.original_name || f.filename,
+        is_image: isImageFile(f.filename || f.original_name || ''),
+      }));
+      addMessageEl(m.role, m.content, m.created_at ? m.created_at * 1000 : Date.now(), m.elapsed, files.length ? files : null);
+    });
     scrollToBottom();
+  }
+
+  function isImageFile(name) {
+    return /\.(png|jpg|jpeg|gif|webp)$/i.test(name);
   }
 
   function getWelcomeHTML() {
@@ -151,19 +177,15 @@
 
   // ── MESSAGE UI ──────────────────────────────
   function addMessageEl(role, content, time, elapsed, files) {
-    // Remove welcome
     const w = messages.querySelector('.welcome');
     if (w) w.remove();
 
     const el = document.createElement('div');
     el.className = `message ${role}`;
-
     const now = time ? new Date(time) : new Date();
     const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-
     const isUser = role === 'user';
 
-    // File attachments HTML
     let filesHtml = '';
     if (files && files.length) {
       const badges = files.map(f => {
@@ -183,12 +205,8 @@
       <div class="msg-content">${isUser ? escapeHtml(content) : renderMarkdown(content)}</div>
       ${elapsed ? `<div class="msg-footer">⏱ ${elapsed}초</div>` : ''}
     `;
-
     messages.appendChild(el);
-
-    // Add copy buttons to code blocks
     if (!isUser) addCopyButtons(el);
-
     scrollToBottom();
     return el;
   }
@@ -219,9 +237,7 @@
     });
   }
 
-  function renderMarkdown(text) {
-    try { return marked.parse(text); } catch { return escapeHtml(text); }
-  }
+  function renderMarkdown(text) { try { return marked.parse(text); } catch { return escapeHtml(text); } }
   function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
   function scrollToBottom() { requestAnimationFrame(() => { messagesWrap.scrollTop = messagesWrap.scrollHeight; }); }
   function showToast(msg) {
@@ -247,8 +263,16 @@
       case 'connected': break;
       case 'start':
         isStreaming = true; streamBuffer = '';
+        // Update activeConvId from server
+        if (data.conversation_id) {
+          activeConvId = data.conversation_id;
+          // Add to local list if not present
+          if (!conversations.find(c => c.id === activeConvId)) {
+            conversations.unshift({ id: activeConvId, title: '새 대화', created_at: Date.now()/1000, updated_at: Date.now()/1000 });
+            renderConvList();
+          }
+        }
         currentMsgEl = addMessageEl('assistant', '', Date.now());
-        // Add typing indicator
         const ti = document.createElement('div');
         ti.className = 'typing-indicator';
         ti.innerHTML = '<span></span><span></span><span></span>';
@@ -258,7 +282,6 @@
         break;
       case 'chunk':
         streamBuffer += data.content;
-        // Remove typing indicator
         const ind = currentMsgEl?.querySelector('.typing-indicator');
         if (ind) ind.remove();
         updateStreamContent(currentMsgEl, streamBuffer);
@@ -269,22 +292,12 @@
         const ti2 = currentMsgEl?.querySelector('.typing-indicator');
         if (ti2) ti2.remove();
         updateStreamContent(currentMsgEl, streamBuffer);
-        // Add footer
         const footer = document.createElement('div');
         footer.className = 'msg-footer';
         footer.textContent = `⏱ ${data.elapsed}초`;
         currentMsgEl?.appendChild(footer);
-        // Save to conversation
-        if (activeConvId && conversations[activeConvId]) {
-          conversations[activeConvId].messages.push({ role: 'assistant', content: streamBuffer, time: Date.now(), elapsed: data.elapsed });
-          // Auto-title from first response
-          if (conversations[activeConvId].messages.length === 2) {
-            const firstQ = conversations[activeConvId].messages[0].content;
-            conversations[activeConvId].title = firstQ.slice(0, 40) + (firstQ.length > 40 ? '...' : '');
-            renderConvList();
-          }
-          saveConversations();
-        }
+        // Refresh conversation list from server
+        loadConversationList();
         currentMsgEl = null; streamBuffer = '';
         statusText.textContent = `✅ 완료 (${data.elapsed}초)`;
         updateSendState();
@@ -299,11 +312,19 @@
     }
   }
 
+  async function loadConversationList() {
+    try {
+      const r = await fetch('/api/conversations');
+      const d = await r.json();
+      conversations = d.conversations || [];
+      renderConvList();
+    } catch {}
+  }
+
   // ── FILE UPLOAD ──────────────────────────────
   async function uploadFile(file) {
     const maxSize = 10 * 1024 * 1024;
     if (file.size > maxSize) { showToast(`파일 크기 초과: ${file.name} (최대 10MB)`); return null; }
-
     const formData = new FormData();
     formData.append('file', file);
     try {
@@ -316,10 +337,7 @@
   async function handleFiles(files) {
     for (const file of files) {
       const result = await uploadFile(file);
-      if (result) {
-        pendingFiles.push(result);
-        renderFilePreview();
-      }
+      if (result) { pendingFiles.push(result); renderFilePreview(); }
     }
     updateSendState();
   }
@@ -348,14 +366,14 @@
 
     if ((!text && !fileIds.length) || isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-    // Ensure conversation exists
-    if (!activeConvId || !conversations[activeConvId]) createConversation();
-
-    conversations[activeConvId].messages.push({ role: 'user', content: text, time: Date.now(), files: fileInfos.length ? fileInfos : undefined });
-    saveConversations();
+    if (!activeConvId) activeConvId = newConvId();
 
     addMessageEl('user', text, Date.now(), null, fileInfos);
-    ws.send(JSON.stringify({ message: text, model: currentModel, file_ids: fileIds.length ? fileIds : undefined }));
+    ws.send(JSON.stringify({
+      message: text, model: currentModel,
+      file_ids: fileIds.length ? fileIds : undefined,
+      conversation_id: activeConvId,
+    }));
     input.value = ''; input.style.height = 'auto';
     charCount.textContent = '0';
     pendingFiles = [];
@@ -363,46 +381,32 @@
     sendBtn.disabled = true;
   }
 
-  // ── PERSISTENCE ─────────────────────────────
-  function saveConversations() {
-    try { localStorage.setItem('cw_conversations', JSON.stringify(conversations)); } catch {}
-  }
-
-  function loadConversations() {
-    try {
-      const d = localStorage.getItem('cw_conversations');
-      if (d) conversations = JSON.parse(d);
-    } catch {}
-  }
-
-  async function loadHistory() {
-    loadConversations();
-    // Also fetch server history
-    try {
-      const r = await fetch('/api/history');
-      const d = await r.json();
-      if (d.history?.length && !Object.keys(conversations).length) {
-        // Import server history into a conversation
-        const id = newConvId();
-        const msgs = d.history.map(m => ({ role: m.role, content: m.content, time: m.ts * 1000 }));
-        const title = msgs[0]?.content?.slice(0, 40) || '이전 대화';
-        conversations[id] = { id, title, messages: msgs, created: msgs[0]?.time || Date.now() };
-        activeConvId = id;
-      }
-    } catch {}
-
-    if (!activeConvId && Object.keys(conversations).length) {
-      const sorted = Object.values(conversations).sort((a, b) => b.created - a.created);
-      activeConvId = sorted[0].id;
+  // ── SEARCH ──────────────────────────────────
+  let searchTimeout = null;
+  async function handleSearch(q) {
+    if (!q.trim()) {
+      await loadConversationList();
+      return;
     }
-
-    renderConvList();
-    renderMessages();
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const d = await r.json();
+      const results = d.results || [];
+      // Show search results in conv list
+      let html = results.map(r => {
+        const active = r.id === activeConvId ? 'active' : '';
+        return `<div class="conv-item ${active}" data-id="${r.id}">
+          <span class="conv-icon">🔍</span>
+          <span class="conv-title">${escapeHtml(r.title)}</span>
+          <div style="font-size:11px;color:var(--text-muted);padding:2px 0 0 28px">${r.snippet || ''}</div>
+        </div>`;
+      }).join('');
+      if (!results.length) html = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">검색 결과 없음</div>';
+      convList.innerHTML = html;
+    } catch {}
   }
 
   // ── EVENT HANDLERS ──────────────────────────
-
-  // File attach
   attachBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => { if (fileInput.files.length) { handleFiles(fileInput.files); fileInput.value = ''; } });
   filePreviewArea.addEventListener('click', e => {
@@ -410,7 +414,6 @@
     if (btn) { pendingFiles.splice(parseInt(btn.dataset.idx), 1); renderFilePreview(); updateSendState(); }
   });
 
-  // Drag & drop
   let dragCounter = 0;
   document.addEventListener('dragenter', e => { e.preventDefault(); dragCounter++; if (dragCounter === 1) showDragOverlay(); });
   document.addEventListener('dragleave', e => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; hideDragOverlay(); } });
@@ -425,7 +428,6 @@
   }
   function hideDragOverlay() { document.getElementById('drag-overlay')?.remove(); }
 
-  // Input
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 150) + 'px';
@@ -435,50 +437,39 @@
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
   sendBtn.addEventListener('click', () => sendMessage());
 
-  // New chat
   $('new-chat-btn').addEventListener('click', () => { createConversation(); });
 
-  // Conversation clicks
   convList.addEventListener('click', e => {
     const del = e.target.closest('[data-del]');
-    if (del) { e.stopPropagation(); deleteConversation(del.dataset.del); return; }
+    if (del) { e.stopPropagation(); deleteConversationById(del.dataset.del); return; }
     const item = e.target.closest('.conv-item');
     if (item) switchConversation(item.dataset.id);
   });
 
-  // Quick prompts
   document.addEventListener('click', e => {
     const card = e.target.closest('.quick-card');
     if (card) sendMessage(card.dataset.prompt);
   });
 
-  // Model select
   modelSelect.addEventListener('change', () => { currentModel = modelSelect.value; });
 
-  // Settings
   $('settings-btn').addEventListener('click', () => { settingsModal.classList.remove('hidden'); });
   $('settings-close').addEventListener('click', () => { settingsModal.classList.add('hidden'); });
   settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
 
   $('clear-history-btn')?.addEventListener('click', async () => {
     if (!confirm('모든 대화 기록을 삭제할까요?')) return;
-    conversations = {}; activeConvId = null;
-    localStorage.removeItem('cw_conversations');
     try { await fetch('/api/history', { method: 'DELETE' }); } catch {}
-    renderConvList(); renderMessages();
+    conversations = []; activeConvId = null;
+    renderConvList(); renderMessages([]);
     settingsModal.classList.add('hidden');
   });
 
-  // Search
   $('search-input').addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    document.querySelectorAll('.conv-item').forEach(el => {
-      const title = el.querySelector('.conv-title')?.textContent?.toLowerCase() || '';
-      el.style.display = !q || title.includes(q) ? '' : 'none';
-    });
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => handleSearch(e.target.value), 300);
   });
 
-  // Sidebar toggle (mobile)
   $('sidebar-toggle').addEventListener('click', () => sidebar.classList.toggle('open'));
   document.addEventListener('click', e => {
     if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && e.target !== $('sidebar-toggle')) {
@@ -486,12 +477,10 @@
     }
   });
 
-  // Settings model sync
   $('setting-model')?.addEventListener('change', e => {
     currentModel = e.target.value;
     modelSelect.value = currentModel;
   });
 
-  // ── INIT ────────────────────────────────────
   checkAuth();
 })();

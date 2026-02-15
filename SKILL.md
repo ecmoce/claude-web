@@ -150,10 +150,18 @@ SESSION_TTL_HOURS=24        # 세션 유효 시간
 ### GET /api/uploads/{file_id}
 업로드된 파일 조회 (이미지 미리보기용).
 
-### 대화 영속성
-- 서버 대화 히스토리가 `data/conversations/{user}.json`에 자동 저장
-- 서버 재시작 후에도 유지
+### 저장소 (SQLite)
+- **DB 파일:** `data/claude-web.db` (WAL 모드, aiosqlite 비동기)
+- **테이블:** conversations, messages, attachments + messages_fts (Full-Text Search)
+- 10MB 이하 첨부파일은 BLOB으로 DB에 직접 저장, 초과 시 디스크
 - `data/` 디렉토리는 `.gitignore`에 포함
+
+### 대화 API
+- `GET /api/conversations` — 대화 목록
+- `GET /api/conversations/{id}/messages` — 대화 메시지
+- `DELETE /api/conversations/{id}` — 대화 삭제
+- `GET /api/search?q=검색어` — FTS 기반 대화 내용 검색
+- 웹 UI는 서버 API로 대화 관리 (localStorage 미사용)
 
 ### GET /auth/login
 GitHub OAuth 로그인 리다이렉트

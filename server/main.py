@@ -1,4 +1,4 @@
-"""FastAPI 메인 앱 — GitHub OAuth, REST API, WebSocket, 파일 업로드."""
+"""FastAPI 메인 앱 — GitHub OAuth, REST API, WebSocket, 파일 업로드, SQLite 저장소."""
 import os
 import time
 import json
@@ -6,6 +6,7 @@ import secrets
 import logging
 import uuid
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
@@ -20,6 +21,7 @@ from server.auth import (
 from server.models import ChatRequest, ChatResponse, UserInfo, HealthResponse
 from server.rate_limit import check_rate_limit
 from server.claude_runner import run_claude, stream_claude
+from server.database import init_db, close_db, save_conversation, update_conversation_title, get_conversations, delete_conversation, delete_all_conversations, save_message, get_messages, save_attachment, get_attachment, search_conversations
 
 # DEV_MODE — 인증 스킵 (GitHub OAuth Client ID/Secret 없을 때)
 DEV_MODE = os.environ.get("DEV_MODE", "").lower() in ("true", "1", "yes")
@@ -27,7 +29,16 @@ DEV_MODE = os.environ.get("DEV_MODE", "").lower() in ("true", "1", "yes")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Claude Web Gateway", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    logger.info("SQLite DB 초기화 완료")
+    yield
+    await close_db()
+
+
+app = FastAPI(title="Claude Web Gateway", version="0.3.0", lifespan=lifespan)
 
 # 정적 파일 서빙 (web/ 디렉토리)
 web_dir = Path(__file__).parent.parent / "web"
@@ -38,9 +49,6 @@ if web_dir.exists():
 UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-CONVERSATIONS_DIR = Path(__file__).parent.parent / "data" / "conversations"
-CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
-
 ALLOWED_EXTENSIONS = {
     ".txt", ".py", ".js", ".ts", ".md", ".json", ".csv", ".yaml", ".yml",
     ".html", ".css", ".xml", ".log", ".sh", ".sql", ".java", ".go", ".rs",
@@ -50,56 +58,17 @@ ALLOWED_EXTENSIONS = {
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
-# 대화 히스토리 (메모리 + 파일 영속성)
-_history: dict[str, list[dict]] = {}
-
 # OAuth state 저장
 _oauth_states: dict[str, float] = {}
 
 
-# ── 대화 영속성 ──────────────────────────────────────
-
-
-def _conv_path(user: str) -> Path:
-    """사용자별 대화 파일 경로 (안전한 파일명)."""
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in user)
-    return CONVERSATIONS_DIR / f"{safe_name}.json"
-
-
-def _load_history(user: str) -> list[dict]:
-    """파일에서 대화 히스토리 로드."""
-    if user in _history:
-        return _history[user]
-    path = _conv_path(user)
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            _history[user] = data
-            return data
-        except Exception as e:
-            logger.warning("대화 로드 실패 %s: %s", user, e)
-    _history[user] = []
-    return _history[user]
-
-
-def _save_history(user: str):
-    """대화 히스토리를 파일에 저장."""
-    try:
-        path = _conv_path(user)
-        path.write_text(json.dumps(_history.get(user, []), ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as e:
-        logger.error("대화 저장 실패 %s: %s", user, e)
-
-
 def _get_user(request: Request) -> str | None:
-    """DEV_MODE면 'dev-user' 반환, 아니면 쿠키에서 확인."""
     if DEV_MODE:
         return "dev-user"
     return get_current_user(request)
 
 
 def _require_user(request: Request) -> str:
-    """인증된 사용자 반환. 없으면 401."""
     user = _get_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -111,7 +80,6 @@ def _require_user(request: Request) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    """메인 페이지 — web/index.html 반환."""
     html_path = web_dir / "index.html"
     if html_path.exists():
         return HTMLResponse(html_path.read_text(encoding="utf-8"))
@@ -131,7 +99,6 @@ async def health():
 
 @app.get("/api/me")
 async def me(request: Request):
-    """현재 로그인 상태 반환."""
     user = _get_user(request)
     if user:
         return {"authenticated": True, "username": user, "dev_mode": DEV_MODE}
@@ -140,13 +107,11 @@ async def me(request: Request):
 
 @app.get("/auth/login")
 async def auth_login():
-    """GitHub OAuth 시작."""
     if DEV_MODE:
         response = RedirectResponse(url="/")
         token = create_session_token("dev-user")
         set_session_cookie(response, token)
         return response
-
     state = secrets.token_urlsafe(32)
     _oauth_states[state] = time.time()
     redirect_uri = f"{BASE_URL}/auth/callback"
@@ -155,20 +120,16 @@ async def auth_login():
 
 @app.get("/auth/callback")
 async def auth_callback(code: str = "", state: str = ""):
-    """GitHub OAuth 콜백."""
     if DEV_MODE:
         return RedirectResponse(url="/")
-
     if state not in _oauth_states:
         return JSONResponse({"error": "Invalid state"}, status_code=400)
     if time.time() - _oauth_states.pop(state) > 600:
         return JSONResponse({"error": "State expired"}, status_code=400)
-
     redirect_uri = f"{BASE_URL}/auth/callback"
     user_info = await exchange_code(code, redirect_uri)
     if not user_info or "login" not in user_info:
         return JSONResponse({"error": "OAuth failed"}, status_code=400)
-
     username = user_info["login"]
     token = create_session_token(username)
     response = RedirectResponse(url="/")
@@ -178,7 +139,6 @@ async def auth_callback(code: str = "", state: str = ""):
 
 @app.get("/auth/logout")
 async def auth_logout():
-    """로그아웃."""
     response = RedirectResponse(url="/")
     clear_session_cookie(response)
     return response
@@ -189,26 +149,18 @@ async def auth_logout():
 
 @app.post("/api/upload")
 async def upload_file(request: Request, file: UploadFile = File(...)):
-    """파일 업로드 — 파일 ID 반환."""
     _require_user(request)
-
-    # 확장자 검증
     if not file.filename:
         raise HTTPException(status_code=400, detail="파일명이 없습니다")
-
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"허용되지 않는 파일 형식: {ext}")
-
-    # 파일 읽기 + 크기 검증
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail=f"파일 크기 초과 (최대 {MAX_FILE_SIZE // 1024 // 1024}MB)")
 
-    # 안전한 파일명 생성
     file_id = f"{uuid.uuid4().hex[:12]}{ext}"
     file_path = UPLOAD_DIR / file_id
-
     file_path.write_bytes(content)
     logger.info("파일 업로드: %s (%d bytes)", file_id, len(content))
 
@@ -223,18 +175,65 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
 
 @app.get("/api/uploads/{file_id}")
 async def get_upload(file_id: str, request: Request):
-    """업로드된 파일 조회 (이미지 미리보기용)."""
     _require_user(request)
-
-    # 경로 traversal 방지
     if "/" in file_id or "\\" in file_id or ".." in file_id:
         raise HTTPException(status_code=400, detail="잘못된 파일 ID")
-
     file_path = UPLOAD_DIR / file_id
     if not file_path.exists() or not file_path.resolve().parent == UPLOAD_DIR.resolve():
         raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
-
     return FileResponse(file_path)
+
+
+# ── Conversations API ────────────────────────────────
+
+
+@app.get("/api/conversations")
+async def api_get_conversations(request: Request):
+    user = _require_user(request)
+    convs = await get_conversations(user)
+    return {"conversations": convs}
+
+
+@app.get("/api/conversations/{conv_id}/messages")
+async def api_get_messages(conv_id: str, request: Request):
+    user = _require_user(request)
+    msgs = await get_messages(conv_id)
+    return {"messages": msgs}
+
+
+@app.delete("/api/conversations/{conv_id}")
+async def api_delete_conversation(conv_id: str, request: Request):
+    user = _require_user(request)
+    ok = await delete_conversation(conv_id, user)
+    if not ok:
+        raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다")
+    return {"deleted": True}
+
+
+@app.get("/api/search")
+async def api_search(q: str, request: Request):
+    user = _require_user(request)
+    if not q.strip():
+        return {"results": []}
+    results = await search_conversations(user, q)
+    return {"results": results}
+
+
+# ── History API (하위 호환) ──────────────────────────
+
+
+@app.get("/api/history")
+async def api_history(request: Request):
+    user = _require_user(request)
+    convs = await get_conversations(user)
+    return {"history": [], "conversations": convs}
+
+
+@app.delete("/api/history")
+async def clear_history(request: Request):
+    user = _require_user(request)
+    await delete_all_conversations(user)
+    return {"cleared": True}
 
 
 # ── Chat API (REST) ──────────────────────────────────
@@ -242,7 +241,6 @@ async def get_upload(file_id: str, request: Request):
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def api_chat(req: ChatRequest, request: Request):
-    """Claude에게 질문 (REST, 비스트리밍)."""
     user = _require_user(request)
     check_rate_limit(request, user)
 
@@ -250,10 +248,15 @@ async def api_chat(req: ChatRequest, request: Request):
     response_text = await run_claude(req.message, req.file_ids, UPLOAD_DIR)
     elapsed = round(time.time() - start, 2)
 
-    history = _load_history(user)
-    history.append({"role": "user", "content": req.message, "ts": start, "file_ids": req.file_ids})
-    history.append({"role": "assistant", "content": response_text, "ts": time.time()})
-    _save_history(user)
+    # Save to DB
+    conv_id = req.conversation_id or f"c_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+    convs = await get_conversations(user)
+    if not any(c["id"] == conv_id for c in convs):
+        title = req.message[:40] + ("..." if len(req.message) > 40 else "")
+        await save_conversation(conv_id, user, title)
+
+    await save_message(conv_id, "user", req.message)
+    await save_message(conv_id, "assistant", response_text, elapsed)
 
     return ChatResponse(
         response=response_text,
@@ -262,36 +265,13 @@ async def api_chat(req: ChatRequest, request: Request):
     )
 
 
-# ── History API ──────────────────────────────────────
-
-
-@app.get("/api/history")
-async def api_history(request: Request):
-    """대화 히스토리 반환."""
-    user = _require_user(request)
-    return {"history": _load_history(user)}
-
-
-@app.delete("/api/history")
-async def clear_history(request: Request):
-    """대화 히스토리 삭제."""
-    user = _require_user(request)
-    _history.pop(user, None)
-    path = _conv_path(user)
-    if path.exists():
-        path.unlink()
-    return {"cleared": True}
-
-
 # ── WebSocket (스트리밍) ─────────────────────────────
 
 
 @app.websocket("/ws")
 async def websocket_chat(ws: WebSocket):
-    """WebSocket 기반 스트리밍 채팅."""
     await ws.accept()
 
-    # 인증 확인
     if DEV_MODE:
         username = "dev-user"
     else:
@@ -310,6 +290,7 @@ async def websocket_chat(ws: WebSocket):
             data = await ws.receive_json()
             message = data.get("message", "").strip()
             file_ids = data.get("file_ids", [])
+            conv_id = data.get("conversation_id")
 
             if not message and not file_ids:
                 await ws.send_json({"type": "error", "content": "Empty message"})
@@ -322,21 +303,37 @@ async def websocket_chat(ws: WebSocket):
             # file_ids 검증
             if file_ids:
                 validated = []
-                for fid in file_ids[:5]:  # 최대 5개
+                for fid in file_ids[:5]:
                     if isinstance(fid, str) and "/" not in fid and "\\" not in fid and ".." not in fid:
                         if (UPLOAD_DIR / fid).exists():
                             validated.append(fid)
                 file_ids = validated
 
-            # 히스토리에 사용자 메시지 추가
-            history = _load_history(username)
-            history.append({
-                "role": "user", "content": message, "ts": time.time(),
-                "file_ids": file_ids if file_ids else None,
-            })
+            # Ensure conversation exists in DB
+            if not conv_id:
+                conv_id = f"c_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+            convs = await get_conversations(username)
+            if not any(c["id"] == conv_id for c in convs):
+                title = message[:40] + ("..." if len(message) > 40 else "")
+                await save_conversation(conv_id, username, title)
 
-            # 스트리밍 시작 알림
-            await ws.send_json({"type": "start"})
+            # Save user message
+            msg_id = await save_message(conv_id, "user", message)
+
+            # Save file attachments to DB
+            if file_ids:
+                for fid in file_ids:
+                    fp = UPLOAD_DIR / fid
+                    if fp.exists():
+                        file_data = fp.read_bytes() if fp.stat().st_size <= MAX_FILE_SIZE else None
+                        await save_attachment(
+                            message_id=msg_id, filename=fid,
+                            original_name=fid, mime_type=None,
+                            size=fp.stat().st_size,
+                            data=file_data, file_path=str(fp) if not file_data else None,
+                        )
+
+            await ws.send_json({"type": "start", "conversation_id": conv_id})
             start = time.time()
 
             full_response = []
@@ -347,16 +344,16 @@ async def websocket_chat(ws: WebSocket):
             elapsed = round(time.time() - start, 2)
             complete_text = "".join(full_response)
 
-            # 히스토리에 응답 추가
-            history.append({
-                "role": "assistant", "content": complete_text, "ts": time.time()
-            })
-            _save_history(username)
+            # Save assistant message
+            await save_message(conv_id, "assistant", complete_text, elapsed)
 
-            await ws.send_json({
-                "type": "done",
-                "elapsed": elapsed,
-            })
+            # Auto-title: update title from first user message
+            conv_msgs = await get_messages(conv_id)
+            if len(conv_msgs) == 2:  # first exchange
+                title = message[:40] + ("..." if len(message) > 40 else "")
+                await update_conversation_title(conv_id, title)
+
+            await ws.send_json({"type": "done", "elapsed": elapsed, "conversation_id": conv_id})
 
     except WebSocketDisconnect:
         logger.info("WebSocket 종료: %s", username)
@@ -372,7 +369,6 @@ async def websocket_chat(ws: WebSocket):
 
 
 def main():
-    """uvicorn으로 서버 시작."""
     import uvicorn
     logger.info("🚀 Claude Web Gateway 시작 — %s:%s (DEV_MODE=%s)", HOST, PORT, DEV_MODE)
     uvicorn.run(app, host=HOST, port=PORT)
