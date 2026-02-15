@@ -330,6 +330,9 @@ button.toggle-pill {
   background: var(--bg); border: 1px solid var(--border);
   color: var(--text-muted); transition: var(--transition);
   user-select: none; outline: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
 }
 .toggle-pill:hover { border-color: var(--primary-border); color: var(--text-secondary); }
 .toggle-pill.active {

@@ -507,22 +507,27 @@
     searchTimeout = setTimeout(() => handleSearch(e.target.value), 300);
   });
 
-  // ── TOGGLE HANDLERS (이벤트 위임) ──────────
-  document.addEventListener('click', e => {
-    const pill = e.target.closest('.toggle-pill');
-    if (!pill) return;
-    e.preventDefault();
-    if (pill.id === 'toggle-web-search') {
+  // ── TOGGLE HANDLERS ──────────────────────
+  function handleToggle(id) {
+    if (id === 'toggle-web-search') {
       webSearchEnabled = !webSearchEnabled;
-      pill.classList.toggle('active', webSearchEnabled);
-    } else if (pill.id === 'toggle-deep-research') {
+      document.getElementById(id).classList.toggle('active', webSearchEnabled);
+    } else if (id === 'toggle-deep-research') {
       deepResearchEnabled = !deepResearchEnabled;
-      pill.classList.toggle('active', deepResearchEnabled);
+      document.getElementById(id).classList.toggle('active', deepResearchEnabled);
       if (deepResearchEnabled && !webSearchEnabled) {
         webSearchEnabled = true;
-        $('toggle-web-search')?.classList.add('active');
+        document.getElementById('toggle-web-search').classList.add('active');
       }
     }
+  }
+  ['toggle-web-search', 'toggle-deep-research'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // click for desktop
+    el.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); handleToggle(id); });
+    // touchend for mobile Safari
+    el.addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); handleToggle(id); }, {passive: false});
   });
 
   $('sidebar-toggle').addEventListener('click', () => sidebar.classList.toggle('open'));
