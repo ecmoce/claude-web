@@ -323,13 +323,13 @@ pre:hover .copy-btn { opacity: 1; }
 .input-toggles {
   display: flex; gap: 8px; margin-bottom: 8px;
 }
-.toggle-pill {
+button.toggle-pill {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 12px; border-radius: 20px; cursor: pointer;
-  font-size: 12px; font-weight: 500;
+  font-size: 12px; font-weight: 500; font-family: inherit;
   background: var(--bg); border: 1px solid var(--border);
   color: var(--text-muted); transition: var(--transition);
-  user-select: none;
+  user-select: none; outline: none;
 }
 .toggle-pill:hover { border-color: var(--primary-border); color: var(--text-secondary); }
 .toggle-pill.active {

@@ -336,7 +336,6 @@ async def websocket_chat(ws: WebSocket):
                             data=file_data, file_path=str(fp) if not file_data else None,
                         )
 
-            await ws.send_json({"type": "start", "conversation_id": conv_id})
             start = time.time()
 
             # 웹 검색 / 딥 리서치 처리
@@ -348,6 +347,8 @@ async def websocket_chat(ws: WebSocket):
                 await ws.send_json({"type": "status", "content": "🔍 웹 검색 중..."})
                 results = await brave_search(message, count=5)
                 search_context = format_search_results(results) if results else None
+
+            await ws.send_json({"type": "start", "conversation_id": conv_id})
 
             full_response = []
             async for chunk in stream_claude(message, file_ids if file_ids else None, UPLOAD_DIR, search_context):
