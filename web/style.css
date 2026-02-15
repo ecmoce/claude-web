@@ -319,28 +319,19 @@ pre:hover .copy-btn { opacity: 1; }
 
 /* ─── INPUT AREA ────────────────────────────── */
 
-/* ── Toggle Pills ── */
+/* ── Toggle Checks ── */
 .input-toggles {
-  display: flex; gap: 8px; margin-bottom: 8px;
+  display: flex; gap: 12px; margin-bottom: 8px;
 }
-button.toggle-pill {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 12px; border-radius: 20px; cursor: pointer;
-  font-size: 12px; font-weight: 500; font-family: inherit;
-  background: var(--bg); border: 1px solid var(--border);
-  color: var(--text-muted); transition: var(--transition);
-  user-select: none; outline: none;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-touch-callout: none;
-  touch-action: manipulation;
+.toggle-check {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 13px; font-weight: 500; color: var(--text-secondary);
+  cursor: pointer; user-select: none;
 }
-.toggle-pill:hover { border-color: var(--primary-border); color: var(--text-secondary); }
-.toggle-pill.active {
-  background: var(--primary-bg); border-color: var(--primary-border);
-  color: var(--primary);
+.toggle-check input[type="checkbox"] {
+  width: 16px; height: 16px; cursor: pointer;
+  accent-color: var(--primary);
 }
-.toggle-pill .toggle-icon { font-size: 13px; pointer-events: none; }
-.toggle-pill .toggle-label { line-height: 1; pointer-events: none; }
 
 .input-area {
   padding: 0 24px 20px; flex-shrink: 0;

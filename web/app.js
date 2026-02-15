@@ -508,26 +508,18 @@
   });
 
   // ── TOGGLE HANDLERS ──────────────────────
-  function handleToggle(id) {
-    if (id === 'toggle-web-search') {
-      webSearchEnabled = !webSearchEnabled;
-      document.getElementById(id).classList.toggle('active', webSearchEnabled);
-    } else if (id === 'toggle-deep-research') {
-      deepResearchEnabled = !deepResearchEnabled;
-      document.getElementById(id).classList.toggle('active', deepResearchEnabled);
-      if (deepResearchEnabled && !webSearchEnabled) {
-        webSearchEnabled = true;
-        document.getElementById('toggle-web-search').classList.add('active');
-      }
+  const chkWebSearch = $('chk-web-search');
+  const chkDeepResearch = $('chk-deep-research');
+
+  if (chkWebSearch) chkWebSearch.addEventListener('change', () => {
+    webSearchEnabled = chkWebSearch.checked;
+  });
+  if (chkDeepResearch) chkDeepResearch.addEventListener('change', () => {
+    deepResearchEnabled = chkDeepResearch.checked;
+    if (deepResearchEnabled && !webSearchEnabled) {
+      webSearchEnabled = true;
+      if (chkWebSearch) chkWebSearch.checked = true;
     }
-  }
-  ['toggle-web-search', 'toggle-deep-research'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    // click for desktop
-    el.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); handleToggle(id); });
-    // touchend for mobile Safari
-    el.addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); handleToggle(id); }, {passive: false});
   });
 
   $('sidebar-toggle').addEventListener('click', () => sidebar.classList.toggle('open'));
