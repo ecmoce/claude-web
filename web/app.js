@@ -24,6 +24,9 @@
   const fileInput = $('file-input');
   const filePreviewArea = $('file-preview-area');
 
+  const toggleWebSearch = $('toggle-web-search');
+  const toggleDeepResearch = $('toggle-deep-research');
+
   let ws = null;
   let isStreaming = false;
   let currentMsgEl = null;
@@ -32,6 +35,8 @@
   let activeConvId = null;
   let currentModel = 'opus';
   let pendingFiles = [];
+  let webSearchEnabled = true;   // 기본 ON
+  let deepResearchEnabled = false; // 기본 OFF
 
   marked.setOptions({
     highlight: (code, lang) => {
@@ -303,6 +308,9 @@
         updateSendState();
         scrollToBottom();
         break;
+      case 'status':
+        statusText.textContent = data.content;
+        break;
       case 'error':
         isStreaming = false;
         showToast(data.content);
@@ -373,6 +381,8 @@
       message: text, model: currentModel,
       file_ids: fileIds.length ? fileIds : undefined,
       conversation_id: activeConvId,
+      web_search: webSearchEnabled,
+      deep_research: deepResearchEnabled,
     }));
     input.value = ''; input.style.height = 'auto';
     charCount.textContent = '0';
@@ -468,6 +478,22 @@
   $('search-input').addEventListener('input', e => {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => handleSearch(e.target.value), 300);
+  });
+
+  // ── TOGGLE HANDLERS ──────────────────────
+  toggleWebSearch.addEventListener('click', () => {
+    webSearchEnabled = !webSearchEnabled;
+    toggleWebSearch.classList.toggle('active', webSearchEnabled);
+    // 딥 리서치 ON이면 웹 검색은 자동 포함
+  });
+  toggleDeepResearch.addEventListener('click', () => {
+    deepResearchEnabled = !deepResearchEnabled;
+    toggleDeepResearch.classList.toggle('active', deepResearchEnabled);
+    // 딥 리서치 ON이면 웹 검색도 자동 ON
+    if (deepResearchEnabled && !webSearchEnabled) {
+      webSearchEnabled = true;
+      toggleWebSearch.classList.add('active');
+    }
   });
 
   $('sidebar-toggle').addEventListener('click', () => sidebar.classList.toggle('open'));

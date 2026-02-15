@@ -319,6 +319,26 @@ pre:hover .copy-btn { opacity: 1; }
 
 /* ─── INPUT AREA ────────────────────────────── */
 
+/* ── Toggle Pills ── */
+.input-toggles {
+  display: flex; gap: 8px; margin-bottom: 8px;
+}
+.toggle-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: 20px; cursor: pointer;
+  font-size: 12px; font-weight: 500;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text-muted); transition: var(--transition);
+  user-select: none;
+}
+.toggle-pill:hover { border-color: var(--primary-border); color: var(--text-secondary); }
+.toggle-pill.active {
+  background: var(--primary-bg); border-color: var(--primary-border);
+  color: var(--primary);
+}
+.toggle-pill .toggle-icon { font-size: 13px; }
+.toggle-pill .toggle-label { line-height: 1; }
+
 .input-area {
   padding: 0 24px 20px; flex-shrink: 0;
   max-width: 848px; margin: 0 auto; width: 100%;

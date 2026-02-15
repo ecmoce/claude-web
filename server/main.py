@@ -21,6 +21,7 @@ from server.auth import (
 from server.models import ChatRequest, ChatResponse, UserInfo, HealthResponse
 from server.rate_limit import check_rate_limit
 from server.claude_runner import run_claude, stream_claude
+from server.web_search import brave_search, format_search_results, deep_research
 from server.database import init_db, close_db, save_conversation, update_conversation_title, get_conversations, delete_conversation, delete_all_conversations, save_message, get_messages, save_attachment, get_attachment, search_conversations
 
 # DEV_MODE — 인증 스킵 (GitHub OAuth Client ID/Secret 없을 때)
@@ -291,6 +292,8 @@ async def websocket_chat(ws: WebSocket):
             message = data.get("message", "").strip()
             file_ids = data.get("file_ids", [])
             conv_id = data.get("conversation_id")
+            web_search_enabled = data.get("web_search", False)
+            deep_research_enabled = data.get("deep_research", False)
 
             if not message and not file_ids:
                 await ws.send_json({"type": "error", "content": "Empty message"})
@@ -336,8 +339,18 @@ async def websocket_chat(ws: WebSocket):
             await ws.send_json({"type": "start", "conversation_id": conv_id})
             start = time.time()
 
+            # 웹 검색 / 딥 리서치 처리
+            search_context = None
+            if deep_research_enabled and message:
+                await ws.send_json({"type": "status", "content": "🔬 딥 리서치 진행 중..."})
+                search_context = await deep_research(message)
+            elif web_search_enabled and message:
+                await ws.send_json({"type": "status", "content": "🔍 웹 검색 중..."})
+                results = await brave_search(message, count=5)
+                search_context = format_search_results(results) if results else None
+
             full_response = []
-            async for chunk in stream_claude(message, file_ids if file_ids else None, UPLOAD_DIR):
+            async for chunk in stream_claude(message, file_ids if file_ids else None, UPLOAD_DIR, search_context):
                 full_response.append(chunk)
                 await ws.send_json({"type": "chunk", "content": chunk})
 

@@ -1,0 +1,132 @@
+"""Brave Search API 통합 — 웹 검색 + 딥 리서치."""
+import os
+import asyncio
+import logging
+import httpx
+
+logger = logging.getLogger(__name__)
+
+BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
+BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+SEARXNG_URL = os.environ.get("SEARXNG_URL", "http://127.0.0.1:8888")
+
+
+async def brave_search(query: str, count: int = 5) -> list[dict]:
+    """Brave Search API로 웹 검색. 결과: [{title, url, snippet}]"""
+    if not BRAVE_API_KEY:
+        return await searxng_search(query, count)
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                BRAVE_SEARCH_URL,
+                params={"q": query, "count": count},
+                headers={"X-Subscription-Token": BRAVE_API_KEY, "Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = []
+            for item in (data.get("web", {}).get("results", []))[:count]:
+                results.append({
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "snippet": item.get("description", ""),
+                })
+            return results
+    except Exception as e:
+        logger.warning("Brave Search 실패, SearXNG fallback: %s", e)
+        return await searxng_search(query, count)
+
+
+async def searxng_search(query: str, count: int = 5) -> list[dict]:
+    """SearXNG 로컬 인스턴스 검색 (fallback)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{SEARXNG_URL}/search",
+                params={"q": query, "format": "json", "pageno": 1},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = []
+            for item in (data.get("results", []))[:count]:
+                results.append({
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "snippet": item.get("content", ""),
+                })
+            return results
+    except Exception as e:
+        logger.error("SearXNG 검색 실패: %s", e)
+        return []
+
+
+def format_search_results(results: list[dict]) -> str:
+    """검색 결과를 Claude에 주입할 텍스트로 포맷."""
+    if not results:
+        return ""
+    lines = ["[웹 검색 결과]"]
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r['title']}")
+        lines.append(f"   URL: {r['url']}")
+        if r['snippet']:
+            lines.append(f"   {r['snippet']}")
+    return "\n".join(lines)
+
+
+async def fetch_page_text(url: str, max_chars: int = 5000) -> str:
+    """URL에서 텍스트 추출 (간단한 HTML 스트립)."""
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+            text = resp.text
+            # 간단한 태그 제거
+            import re
+            text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+            text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            return text[:max_chars]
+    except Exception as e:
+        logger.warning("페이지 fetch 실패 %s: %s", url, e)
+        return ""
+
+
+async def deep_research(query: str, claude_fn=None) -> str:
+    """딥 리서치: 검색 → 상위 페이지 읽기 → 종합 컨텍스트 생성.
+
+    Returns context string to prepend to user message.
+    """
+    # 1차 검색
+    results = await brave_search(query, count=8)
+    if not results:
+        return "[딥 리서치: 검색 결과를 찾을 수 없습니다]"
+
+    # 상위 3-5개 페이지 내용 수집
+    tasks = [fetch_page_text(r["url"], max_chars=4000) for r in results[:5]]
+    pages = await asyncio.gather(*tasks)
+
+    # 컨텍스트 구성
+    sections = ["[딥 리서치 결과]", f"검색어: {query}", ""]
+    for i, (r, page_text) in enumerate(zip(results[:5], pages), 1):
+        sections.append(f"--- 출처 {i}: {r['title']} ---")
+        sections.append(f"URL: {r['url']}")
+        if page_text:
+            sections.append(page_text[:3000])
+        elif r['snippet']:
+            sections.append(r['snippet'])
+        sections.append("")
+
+    # 추가 검색 결과 요약
+    if len(results) > 5:
+        sections.append("--- 추가 검색 결과 ---")
+        for r in results[5:]:
+            sections.append(f"• {r['title']} ({r['url']}): {r['snippet']}")
+
+    context = "\n".join(sections)
+    # 전체 컨텍스트 제한 (20K chars)
+    if len(context) > 20000:
+        context = context[:20000] + "\n... (잘림)"
+
+    return context

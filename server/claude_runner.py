@@ -72,12 +72,17 @@ async def run_claude(message: str, file_ids: list[str] | None = None, upload_dir
         return await _execute(message, file_ids, upload_dir)
 
 
-async def stream_claude(message: str, file_ids: list[str] | None = None, upload_dir: Path | None = None):
+async def stream_claude(message: str, file_ids: list[str] | None = None, upload_dir: Path | None = None,
+                        search_context: str | None = None):
     """Claude CLI를 실행하고 청크 단위로 yield (WebSocket용)."""
     async with _semaphore:
         _upload_dir = upload_dir or Path("/tmp")
         full_message = _build_message_with_files(message, file_ids, _upload_dir)
         images = _get_image_files(file_ids, _upload_dir)
+
+        # 웹 검색/딥 리서치 컨텍스트 주입
+        if search_context:
+            full_message = search_context + "\n\n---\n\n[사용자 질문]\n" + full_message
 
         cmd = [CLAUDE_CMD, "--print", "--model", CLAUDE_MODEL]
         # 이미지 파일 추가
