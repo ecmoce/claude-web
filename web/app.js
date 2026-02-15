@@ -1,299 +1,411 @@
 /**
- * Claude Web Gateway — 클라이언트 앱
- * WebSocket 스트리밍, 마크다운 렌더링, 코드 하이라이팅
+ * Claude Web Gateway — 클라이언트 앱 v2
+ * 사이드바, 대화 히스토리, 모델 설정, WebSocket 스트리밍
  */
-
 (() => {
-    // DOM 요소
-    const loginScreen = document.getElementById('login-screen');
-    const chatScreen = document.getElementById('chat-screen');
-    const messages = document.getElementById('messages');
-    const input = document.getElementById('input');
-    const sendBtn = document.getElementById('send-btn');
-    const clearBtn = document.getElementById('clear-btn');
-    const userBadge = document.getElementById('user-badge');
-    const connectionBadge = document.getElementById('connection-badge');
-    const statusText = document.getElementById('status-text');
-    const charCount = document.getElementById('char-count');
+  // ── DOM ──────────────────────────────────────
+  const $ = id => document.getElementById(id);
+  const loginScreen = $('login-screen');
+  const app = $('app');
+  const messages = $('messages');
+  const messagesWrap = $('messages-wrap');
+  const input = $('input');
+  const sendBtn = $('send-btn');
+  const connIndicator = $('conn-indicator');
+  const connText = $('conn-text');
+  const statusText = $('status-text');
+  const charCount = $('char-count');
+  const userAvatar = $('user-avatar');
+  const userName = $('user-name');
+  const convList = $('conv-list');
+  const modelSelect = $('model-select');
+  const settingsModal = $('settings-modal');
+  const sidebar = $('sidebar');
+  const welcome = $('welcome');
 
-    let ws = null;
-    let isStreaming = false;
-    let currentAssistantEl = null;
-    let streamBuffer = '';
+  let ws = null;
+  let isStreaming = false;
+  let currentMsgEl = null;
+  let streamBuffer = '';
+  let conversations = {};
+  let activeConvId = null;
+  let currentModel = 'opus';
 
-    // marked 설정 — 코드 하이라이팅
-    marked.setOptions({
-        highlight: (code, lang) => {
-            if (lang && hljs.getLanguage(lang)) {
-                return hljs.highlight(code, { language: lang }).value;
-            }
-            return hljs.highlightAuto(code).value;
-        },
-        breaks: true,
-        gfm: true,
+  // marked 설정
+  marked.setOptions({
+    highlight: (code, lang) => {
+      if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
+      return hljs.highlightAuto(code).value;
+    },
+    breaks: true, gfm: true
+  });
+
+  // ── AUTH ─────────────────────────────────────
+  async function checkAuth() {
+    try {
+      const r = await fetch('/api/me');
+      const d = await r.json();
+      if (d.authenticated) { showApp(d.username, d.dev_mode); }
+      else showLogin();
+    } catch { showLogin(); }
+  }
+
+  function showLogin() { loginScreen.classList.remove('hidden'); app.classList.add('hidden'); }
+
+  function showApp(username, devMode) {
+    loginScreen.classList.add('hidden');
+    app.classList.remove('hidden');
+    userAvatar.textContent = username[0].toUpperCase();
+    userName.textContent = devMode ? '🔧 DEV' : `@${username}`;
+    loadHistory();
+    connectWS();
+  }
+
+  // ── CONVERSATIONS ───────────────────────────
+  function newConvId() { return 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
+
+  function createConversation() {
+    const id = newConvId();
+    conversations[id] = { id, title: '새 대화', messages: [], created: Date.now() };
+    activeConvId = id;
+    renderConvList();
+    renderMessages();
+    return id;
+  }
+
+  function renderConvList() {
+    const sorted = Object.values(conversations).sort((a, b) => b.created - a.created);
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+    let html = '';
+    let lastSection = '';
+    sorted.forEach(c => {
+      const d = new Date(c.created);
+      const section = d.toDateString() === today ? '오늘' : d.toDateString() === yesterday ? '어제' : d.toLocaleDateString('ko-KR');
+      if (section !== lastSection) { html += `<div class="conv-section">${section}</div>`; lastSection = section; }
+      const time = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      const active = c.id === activeConvId ? 'active' : '';
+      html += `<div class="conv-item ${active}" data-id="${c.id}">
+        <span class="conv-icon">💬</span>
+        <span class="conv-title">${escapeHtml(c.title)}</span>
+        <span class="conv-time">${time}</span>
+        <button class="conv-delete" data-del="${c.id}" title="삭제">✕</button>
+      </div>`;
     });
+    if (!sorted.length) html = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">대화가 없습니다</div>';
+    convList.innerHTML = html;
+  }
 
-    // ── 인증 확인 ──────────────────────────────
+  function switchConversation(id) {
+    if (!conversations[id]) return;
+    activeConvId = id;
+    renderConvList();
+    renderMessages();
+  }
 
-    async function checkAuth() {
-        try {
-            const resp = await fetch('/api/me');
-            const data = await resp.json();
-            if (data.authenticated) {
-                showChat(data.username, data.dev_mode);
-            } else {
-                showLogin();
-            }
-        } catch {
-            showLogin();
-        }
+  function deleteConversation(id) {
+    delete conversations[id];
+    if (activeConvId === id) {
+      const keys = Object.keys(conversations);
+      activeConvId = keys.length ? keys[keys.length - 1] : null;
     }
+    saveConversations();
+    renderConvList();
+    renderMessages();
+  }
 
-    function showLogin() {
-        loginScreen.classList.remove('hidden');
-        chatScreen.classList.add('hidden');
+  function renderMessages() {
+    messages.innerHTML = '';
+    if (!activeConvId || !conversations[activeConvId]) {
+      messages.innerHTML = getWelcomeHTML();
+      return;
     }
-
-    function showChat(username, devMode) {
-        loginScreen.classList.add('hidden');
-        chatScreen.classList.remove('hidden');
-        userBadge.textContent = devMode ? '🔧 DEV' : `@${username}`;
-        connectWS();
+    const conv = conversations[activeConvId];
+    if (!conv.messages.length) {
+      messages.innerHTML = getWelcomeHTML();
+      return;
     }
+    conv.messages.forEach(m => addMessageEl(m.role, m.content, m.time, m.elapsed));
+    scrollToBottom();
+  }
 
-    // ── WebSocket ──────────────────────────────
+  function getWelcomeHTML() {
+    return `<div class="welcome">
+      <div class="welcome-icon"><div class="logo-mark-lg">C</div></div>
+      <h2>무엇을 도와드릴까요?</h2>
+      <p class="welcome-sub">Claude Opus가 Mac mini에서 실행 중입니다</p>
+      <div class="quick-grid">
+        <button class="quick-card" data-prompt="Python으로 FastAPI 웹 서버를 만들어줘"><span class="quick-icon">🐍</span><span class="quick-label">Python 웹 서버</span><span class="quick-desc">FastAPI로 REST API 만들기</span></button>
+        <button class="quick-card" data-prompt="이 코드를 리뷰하고 개선점을 알려줘"><span class="quick-icon">🔍</span><span class="quick-label">코드 리뷰</span><span class="quick-desc">품질 개선 제안 받기</span></button>
+        <button class="quick-card" data-prompt="Docker와 Kubernetes의 차이를 설명해줘"><span class="quick-icon">🐳</span><span class="quick-label">기술 설명</span><span class="quick-desc">복잡한 개념 쉽게 이해</span></button>
+        <button class="quick-card" data-prompt="효율적인 알고리즘을 설계해줘"><span class="quick-icon">⚡</span><span class="quick-label">알고리즘</span><span class="quick-desc">최적화된 솔루션 설계</span></button>
+      </div>
+    </div>`;
+  }
 
-    function connectWS() {
-        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        ws = new WebSocket(`${proto}//${location.host}/ws`);
+  // ── MESSAGE UI ──────────────────────────────
+  function addMessageEl(role, content, time, elapsed) {
+    // Remove welcome
+    const w = messages.querySelector('.welcome');
+    if (w) w.remove();
 
-        ws.onopen = () => {
-            connectionBadge.textContent = '연결됨';
-            connectionBadge.classList.add('connected');
-            statusText.textContent = '준비됨';
-        };
+    const el = document.createElement('div');
+    el.className = `message ${role}`;
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            handleMessage(data);
-        };
+    const now = time ? new Date(time) : new Date();
+    const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 
-        ws.onclose = () => {
-            connectionBadge.textContent = '연결 끊김';
-            connectionBadge.classList.remove('connected');
-            statusText.textContent = '재연결 중...';
-            // 3초 후 재연결
-            setTimeout(connectWS, 3000);
-        };
+    const isUser = role === 'user';
+    el.innerHTML = `
+      <div class="msg-header">
+        <div class="msg-avatar ${isUser ? 'user-a' : 'bot-a'}">${isUser ? '👤' : 'C'}</div>
+        <span class="msg-name">${isUser ? 'You' : 'Claude'}</span>
+        <span class="msg-time">${timeStr}</span>
+      </div>
+      <div class="msg-content">${isUser ? escapeHtml(content) : renderMarkdown(content)}</div>
+      ${elapsed ? `<div class="msg-footer">⏱ ${elapsed}초</div>` : ''}
+    `;
 
-        ws.onerror = () => {
-            showToast('WebSocket 연결 오류');
-        };
-    }
+    messages.appendChild(el);
 
-    function handleMessage(data) {
-        switch (data.type) {
-            case 'connected':
-                break;
+    // Add copy buttons to code blocks
+    if (!isUser) addCopyButtons(el);
 
-            case 'start':
-                // 스트리밍 시작 — assistant 메시지 생성
-                isStreaming = true;
-                streamBuffer = '';
-                currentAssistantEl = addMessage('assistant', '');
-                showTyping(currentAssistantEl);
-                statusText.textContent = '⏳ Claude 응답 중...';
-                sendBtn.disabled = true;
-                break;
+    scrollToBottom();
+    return el;
+  }
 
-            case 'chunk':
-                // 스트리밍 청크 — 버퍼에 추가 후 렌더링
-                streamBuffer += data.content;
-                updateMessageContent(currentAssistantEl, streamBuffer);
-                scrollToBottom();
-                break;
+  function updateStreamContent(el, content) {
+    if (!el) return;
+    const body = el.querySelector('.msg-content');
+    body.innerHTML = renderMarkdown(content);
+    body.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+    addCopyButtons(el);
+  }
 
-            case 'done':
-                // 스트리밍 완료
-                isStreaming = false;
-                hideTyping(currentAssistantEl);
-                updateMessageContent(currentAssistantEl, streamBuffer);
-                addFooter(currentAssistantEl, data.elapsed);
-                currentAssistantEl = null;
-                streamBuffer = '';
-                statusText.textContent = `✅ 완료 (${data.elapsed}초)`;
-                sendBtn.disabled = !input.value.trim();
-                scrollToBottom();
-                break;
-
-            case 'error':
-                isStreaming = false;
-                showToast(data.content);
-                statusText.textContent = '❌ 오류 발생';
-                sendBtn.disabled = !input.value.trim();
-                break;
-        }
-    }
-
-    // ── 메시지 UI ──────────────────────────────
-
-    function clearWelcome() {
-        const welcome = messages.querySelector('.welcome-message');
-        if (welcome) welcome.remove();
-    }
-
-    function addMessage(role, content) {
-        clearWelcome();
-
-        const el = document.createElement('div');
-        el.className = `message ${role}`;
-
-        const header = document.createElement('div');
-        header.className = 'msg-header';
-        header.textContent = role === 'user' ? '👤 You' : '🤖 Claude';
-
-        const body = document.createElement('div');
-        body.className = 'msg-content';
-        if (content) {
-            body.innerHTML = role === 'user' ? escapeHtml(content) : renderMarkdown(content);
-        }
-
-        el.appendChild(header);
-        el.appendChild(body);
-        messages.appendChild(el);
-        scrollToBottom();
-        return el;
-    }
-
-    function updateMessageContent(el, content) {
-        if (!el) return;
-        const body = el.querySelector('.msg-content');
-        body.innerHTML = renderMarkdown(content);
-        // 코드 블록 하이라이팅 재적용
-        body.querySelectorAll('pre code').forEach((block) => {
-            hljs.highlightElement(block);
+  function addCopyButtons(el) {
+    el.querySelectorAll('pre').forEach(pre => {
+      if (pre.querySelector('.copy-btn')) return;
+      const btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.textContent = '복사';
+      btn.onclick = () => {
+        const code = pre.querySelector('code')?.textContent || pre.textContent;
+        navigator.clipboard.writeText(code).then(() => {
+          btn.textContent = '✓ 복사됨';
+          setTimeout(() => btn.textContent = '복사', 2000);
         });
-    }
+      };
+      pre.style.position = 'relative';
+      pre.appendChild(btn);
+    });
+  }
 
-    function addFooter(el, elapsed) {
-        if (!el) return;
+  function renderMarkdown(text) {
+    try { return marked.parse(text); } catch { return escapeHtml(text); }
+  }
+  function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+  function scrollToBottom() { requestAnimationFrame(() => { messagesWrap.scrollTop = messagesWrap.scrollHeight; }); }
+  function showToast(msg) {
+    const t = document.createElement('div'); t.className = 'error-toast'; t.textContent = msg;
+    document.body.appendChild(t); setTimeout(() => t.remove(), 3500);
+  }
+
+  // ── WEBSOCKET ───────────────────────────────
+  function connectWS() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+    ws.onopen = () => { connIndicator.classList.add('connected'); connText.textContent = '연결됨'; };
+    ws.onmessage = e => handleWS(JSON.parse(e.data));
+    ws.onclose = () => {
+      connIndicator.classList.remove('connected'); connText.textContent = '재연결 중...';
+      setTimeout(connectWS, 3000);
+    };
+    ws.onerror = () => showToast('WebSocket 연결 오류');
+  }
+
+  function handleWS(data) {
+    switch (data.type) {
+      case 'connected': break;
+      case 'start':
+        isStreaming = true; streamBuffer = '';
+        currentMsgEl = addMessageEl('assistant', '', Date.now());
+        // Add typing indicator
+        const ti = document.createElement('div');
+        ti.className = 'typing-indicator';
+        ti.innerHTML = '<span></span><span></span><span></span>';
+        currentMsgEl.appendChild(ti);
+        statusText.textContent = '⏳ Claude 응답 중...';
+        sendBtn.disabled = true;
+        break;
+      case 'chunk':
+        streamBuffer += data.content;
+        // Remove typing indicator
+        const ind = currentMsgEl?.querySelector('.typing-indicator');
+        if (ind) ind.remove();
+        updateStreamContent(currentMsgEl, streamBuffer);
+        scrollToBottom();
+        break;
+      case 'done':
+        isStreaming = false;
+        const ti2 = currentMsgEl?.querySelector('.typing-indicator');
+        if (ti2) ti2.remove();
+        updateStreamContent(currentMsgEl, streamBuffer);
+        // Add footer
         const footer = document.createElement('div');
         footer.className = 'msg-footer';
-        footer.textContent = `⏱ ${elapsed}초`;
-        el.appendChild(footer);
-    }
-
-    function showTyping(el) {
-        if (!el) return;
-        const indicator = document.createElement('div');
-        indicator.className = 'typing-indicator';
-        indicator.innerHTML = '<span></span><span></span><span></span>';
-        el.appendChild(indicator);
-    }
-
-    function hideTyping(el) {
-        if (!el) return;
-        const indicator = el.querySelector('.typing-indicator');
-        if (indicator) indicator.remove();
-    }
-
-    function renderMarkdown(text) {
-        try {
-            return marked.parse(text);
-        } catch {
-            return escapeHtml(text);
+        footer.textContent = `⏱ ${data.elapsed}초`;
+        currentMsgEl?.appendChild(footer);
+        // Save to conversation
+        if (activeConvId && conversations[activeConvId]) {
+          conversations[activeConvId].messages.push({ role: 'assistant', content: streamBuffer, time: Date.now(), elapsed: data.elapsed });
+          // Auto-title from first response
+          if (conversations[activeConvId].messages.length === 2) {
+            const firstQ = conversations[activeConvId].messages[0].content;
+            conversations[activeConvId].title = firstQ.slice(0, 40) + (firstQ.length > 40 ? '...' : '');
+            renderConvList();
+          }
+          saveConversations();
         }
+        currentMsgEl = null; streamBuffer = '';
+        statusText.textContent = `✅ 완료 (${data.elapsed}초)`;
+        sendBtn.disabled = !input.value.trim();
+        scrollToBottom();
+        break;
+      case 'error':
+        isStreaming = false;
+        showToast(data.content);
+        statusText.textContent = '❌ 오류';
+        sendBtn.disabled = !input.value.trim();
+        break;
+    }
+  }
+
+  // ── SEND ────────────────────────────────────
+  function sendMessage(text) {
+    text = text || input.value.trim();
+    if (!text || isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Ensure conversation exists
+    if (!activeConvId || !conversations[activeConvId]) createConversation();
+
+    conversations[activeConvId].messages.push({ role: 'user', content: text, time: Date.now() });
+    saveConversations();
+
+    addMessageEl('user', text, Date.now());
+    ws.send(JSON.stringify({ message: text, model: currentModel }));
+    input.value = ''; input.style.height = 'auto';
+    charCount.textContent = '0';
+    sendBtn.disabled = true;
+  }
+
+  // ── PERSISTENCE ─────────────────────────────
+  function saveConversations() {
+    try { localStorage.setItem('cw_conversations', JSON.stringify(conversations)); } catch {}
+  }
+
+  function loadConversations() {
+    try {
+      const d = localStorage.getItem('cw_conversations');
+      if (d) conversations = JSON.parse(d);
+    } catch {}
+  }
+
+  async function loadHistory() {
+    loadConversations();
+    // Also fetch server history
+    try {
+      const r = await fetch('/api/history');
+      const d = await r.json();
+      if (d.history?.length && !Object.keys(conversations).length) {
+        // Import server history into a conversation
+        const id = newConvId();
+        const msgs = d.history.map(m => ({ role: m.role, content: m.content, time: m.ts * 1000 }));
+        const title = msgs[0]?.content?.slice(0, 40) || '이전 대화';
+        conversations[id] = { id, title, messages: msgs, created: msgs[0]?.time || Date.now() };
+        activeConvId = id;
+      }
+    } catch {}
+
+    if (!activeConvId && Object.keys(conversations).length) {
+      const sorted = Object.values(conversations).sort((a, b) => b.created - a.created);
+      activeConvId = sorted[0].id;
     }
 
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
+    renderConvList();
+    renderMessages();
+  }
 
-    function scrollToBottom() {
-        requestAnimationFrame(() => {
-            messages.scrollTop = messages.scrollHeight;
-        });
-    }
+  // ── EVENT HANDLERS ──────────────────────────
 
-    function showToast(msg) {
-        const toast = document.createElement('div');
-        toast.className = 'error-toast';
-        toast.textContent = msg;
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 3500);
-    }
+  // Input
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 150) + 'px';
+    sendBtn.disabled = !input.value.trim() || isStreaming;
+    charCount.textContent = input.value.length.toLocaleString();
+  });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+  sendBtn.addEventListener('click', () => sendMessage());
 
-    // ── 전송 ───────────────────────────────────
+  // New chat
+  $('new-chat-btn').addEventListener('click', () => { createConversation(); });
 
-    function sendMessage() {
-        const text = input.value.trim();
-        if (!text || isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
+  // Conversation clicks
+  convList.addEventListener('click', e => {
+    const del = e.target.closest('[data-del]');
+    if (del) { e.stopPropagation(); deleteConversation(del.dataset.del); return; }
+    const item = e.target.closest('.conv-item');
+    if (item) switchConversation(item.dataset.id);
+  });
 
-        addMessage('user', text);
-        ws.send(JSON.stringify({ message: text }));
-        input.value = '';
-        input.style.height = 'auto';
-        updateCharCount();
-        sendBtn.disabled = true;
-    }
+  // Quick prompts
+  document.addEventListener('click', e => {
+    const card = e.target.closest('.quick-card');
+    if (card) sendMessage(card.dataset.prompt);
+  });
 
-    // ── 히스토리 삭제 ──────────────────────────
+  // Model select
+  modelSelect.addEventListener('change', () => { currentModel = modelSelect.value; });
 
-    async function clearHistory() {
-        if (!confirm('대화 기록을 모두 삭제할까요?')) return;
-        try {
-            await fetch('/api/history', { method: 'DELETE' });
-            messages.innerHTML = '';
-            // 웰컴 메시지 복원
-            messages.innerHTML = `
-                <div class="welcome-message">
-                    <div class="welcome-icon">🤖</div>
-                    <h2>안녕하세요!</h2>
-                    <p>Claude에게 무엇이든 물어보세요.</p>
-                </div>`;
-        } catch {
-            showToast('히스토리 삭제 실패');
-        }
-    }
+  // Settings
+  $('settings-btn').addEventListener('click', () => { settingsModal.classList.remove('hidden'); });
+  $('settings-close').addEventListener('click', () => { settingsModal.classList.add('hidden'); });
+  settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
 
-    // ── 입력 핸들링 ────────────────────────────
+  $('clear-history-btn')?.addEventListener('click', async () => {
+    if (!confirm('모든 대화 기록을 삭제할까요?')) return;
+    conversations = {}; activeConvId = null;
+    localStorage.removeItem('cw_conversations');
+    try { await fetch('/api/history', { method: 'DELETE' }); } catch {}
+    renderConvList(); renderMessages();
+    settingsModal.classList.add('hidden');
+  });
 
-    function updateCharCount() {
-        const len = input.value.length;
-        charCount.textContent = `${len.toLocaleString()} / 10,000`;
-        charCount.style.color = len > 9000 ? 'var(--red)' : 'var(--text-muted)';
-    }
-
-    // textarea 자동 높이 조절
-    input.addEventListener('input', () => {
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 150) + 'px';
-        sendBtn.disabled = !input.value.trim() || isStreaming;
-        updateCharCount();
+  // Search
+  $('search-input').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('.conv-item').forEach(el => {
+      const title = el.querySelector('.conv-title')?.textContent?.toLowerCase() || '';
+      el.style.display = !q || title.includes(q) ? '' : 'none';
     });
+  });
 
-    // Enter 전송, Shift+Enter 줄바꿈
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
+  // Sidebar toggle (mobile)
+  $('sidebar-toggle').addEventListener('click', () => sidebar.classList.toggle('open'));
+  document.addEventListener('click', e => {
+    if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && e.target !== $('sidebar-toggle')) {
+      sidebar.classList.remove('open');
+    }
+  });
 
-    sendBtn.addEventListener('click', sendMessage);
-    clearBtn.addEventListener('click', clearHistory);
+  // Settings model sync
+  $('setting-model')?.addEventListener('change', e => {
+    currentModel = e.target.value;
+    modelSelect.value = currentModel;
+  });
 
-    // 퀵 프롬프트 클릭
-    document.addEventListener('click', (e) => {
-        if (e.target.classList.contains('quick-prompt')) {
-            input.value = e.target.dataset.prompt;
-            input.dispatchEvent(new Event('input'));
-            sendMessage();
-        }
-    });
-
-    // ── 시작 ───────────────────────────────────
-    checkAuth();
+  // ── INIT ────────────────────────────────────
+  checkAuth();
 })();

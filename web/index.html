@@ -5,74 +5,187 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Claude Web Gateway</title>
     <link rel="stylesheet" href="/static/style.css">
-    <!-- 마크다운 렌더링 + 코드 하이라이팅 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
     <!-- 로그인 화면 -->
     <div id="login-screen" class="screen">
+        <div class="login-bg">
+            <div class="orb orb-1"></div>
+            <div class="orb orb-2"></div>
+            <div class="orb orb-3"></div>
+        </div>
         <div class="login-container">
-            <div class="logo">
-                <div class="logo-icon">⚡</div>
+            <div class="login-card">
+                <div class="logo-mark">C</div>
                 <h1>Claude Web Gateway</h1>
-                <p class="subtitle">Anthropic Claude에게 직접 질문하세요</p>
-            </div>
-            <a href="/auth/login" class="btn-github" id="login-btn">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                    <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-                </svg>
-                GitHub로 로그인
-            </a>
-            <div class="login-footer">
-                <span class="pulse-dot"></span> Claude Opus 연결됨
+                <p class="login-sub">Mac mini에서 실행 중인 Claude Opus에<br>안전하게 연결합니다</p>
+                <a href="/auth/login" class="btn-login" id="login-btn">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                    GitHub로 로그인
+                </a>
+                <div class="login-status">
+                    <span class="status-dot green"></span>
+                    <span>Claude Opus · 실행 중</span>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- 채팅 화면 -->
-    <div id="chat-screen" class="screen hidden">
-        <header class="chat-header">
-            <div class="header-left">
-                <span class="header-icon">⚡</span>
-                <span class="header-title">Claude Gateway</span>
-                <span class="connection-badge" id="connection-badge">연결 중...</span>
+    <!-- 메인 앱 -->
+    <div id="app" class="screen hidden">
+        <!-- 사이드바 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    <span class="logo-mark-sm">C</span>
+                    <span class="sidebar-title">Claude</span>
+                </div>
+                <button class="btn-new-chat" id="new-chat-btn" title="새 대화">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                </button>
             </div>
-            <div class="header-right">
-                <span class="user-badge" id="user-badge"></span>
-                <button class="btn-icon" id="clear-btn" title="대화 초기화">🗑️</button>
-                <a href="/auth/logout" class="btn-icon" title="로그아웃">🚪</a>
-            </div>
-        </header>
 
-        <main class="chat-messages" id="messages">
-            <div class="welcome-message">
-                <div class="welcome-icon">🤖</div>
-                <h2>안녕하세요!</h2>
-                <p>Claude에게 무엇이든 물어보세요. 코드, 분석, 창작 — 뭐든 가능합니다.</p>
-                <div class="quick-prompts">
-                    <button class="quick-prompt" data-prompt="Python으로 간단한 웹 서버를 만들어줘">🐍 Python 웹 서버</button>
-                    <button class="quick-prompt" data-prompt="최근 AI 트렌드를 요약해줘">🧠 AI 트렌드</button>
-                    <button class="quick-prompt" data-prompt="좋은 코드 리뷰 체크리스트를 만들어줘">✅ 코드 리뷰</button>
+            <!-- 검색 -->
+            <div class="sidebar-search">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input type="text" id="search-input" placeholder="대화 검색...">
+            </div>
+
+            <!-- 대화 목록 -->
+            <div class="conv-list" id="conv-list">
+                <div class="conv-section">오늘</div>
+            </div>
+
+            <!-- 사이드바 하단 -->
+            <div class="sidebar-footer">
+                <button class="sidebar-btn" id="settings-btn">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                    설정
+                </button>
+                <div class="user-info" id="user-info">
+                    <div class="user-avatar" id="user-avatar">?</div>
+                    <span class="user-name" id="user-name">—</span>
+                    <a href="/auth/logout" class="btn-logout" title="로그아웃">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                    </a>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 모바일 사이드바 토글 -->
+        <button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+
+        <!-- 메인 채팅 영역 -->
+        <main class="chat-main">
+            <!-- 헤더 -->
+            <header class="chat-header">
+                <div class="header-model">
+                    <span class="model-dot"></span>
+                    <select id="model-select" class="model-select">
+                        <option value="opus">Claude Opus 4.6</option>
+                        <option value="sonnet">Claude Sonnet 4</option>
+                        <option value="haiku">Claude Haiku 3.5</option>
+                    </select>
+                </div>
+                <div class="header-status">
+                    <span class="conn-indicator" id="conn-indicator"></span>
+                    <span id="conn-text">연결 중...</span>
+                </div>
+            </header>
+
+            <!-- 메시지 영역 -->
+            <div class="messages-wrap" id="messages-wrap">
+                <div class="messages" id="messages">
+                    <!-- 웰컴 -->
+                    <div class="welcome" id="welcome">
+                        <div class="welcome-icon">
+                            <div class="logo-mark-lg">C</div>
+                        </div>
+                        <h2>무엇을 도와드릴까요?</h2>
+                        <p class="welcome-sub">Claude Opus가 Mac mini에서 실행 중입니다</p>
+                        <div class="quick-grid">
+                            <button class="quick-card" data-prompt="Python으로 FastAPI 웹 서버를 만들어줘">
+                                <span class="quick-icon">🐍</span>
+                                <span class="quick-label">Python 웹 서버</span>
+                                <span class="quick-desc">FastAPI로 REST API 만들기</span>
+                            </button>
+                            <button class="quick-card" data-prompt="이 코드를 리뷰하고 개선점을 알려줘">
+                                <span class="quick-icon">🔍</span>
+                                <span class="quick-label">코드 리뷰</span>
+                                <span class="quick-desc">품질 개선 제안 받기</span>
+                            </button>
+                            <button class="quick-card" data-prompt="Docker와 Kubernetes의 차이를 설명해줘">
+                                <span class="quick-icon">🐳</span>
+                                <span class="quick-label">기술 설명</span>
+                                <span class="quick-desc">복잡한 개념 쉽게 이해</span>
+                            </button>
+                            <button class="quick-card" data-prompt="효율적인 알고리즘을 설계해줘">
+                                <span class="quick-icon">⚡</span>
+                                <span class="quick-label">알고리즘</span>
+                                <span class="quick-desc">최적화된 솔루션 설계</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 입력 영역 -->
+            <div class="input-area">
+                <div class="input-box">
+                    <textarea id="input" placeholder="메시지를 입력하세요..." rows="1"></textarea>
+                    <div class="input-actions">
+                        <span class="char-counter" id="char-count">0</span>
+                        <button id="send-btn" class="btn-send" disabled>
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="input-hint">
+                    <span id="status-text">Enter로 전송 · Shift+Enter로 줄바꿈</span>
                 </div>
             </div>
         </main>
+    </div>
 
-        <footer class="chat-input-area">
-            <div class="input-container">
-                <textarea id="input" placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)" rows="1"></textarea>
-                <button id="send-btn" class="btn-send" disabled>
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                    </svg>
-                </button>
+    <!-- 설정 모달 -->
+    <div class="modal-overlay hidden" id="settings-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>⚙️ 설정</h3>
+                <button class="modal-close" id="settings-close">✕</button>
             </div>
-            <div class="input-footer">
-                <span id="status-text">준비됨</span>
-                <span id="char-count">0 / 10,000</span>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <label>모델</label>
+                    <select id="setting-model" class="setting-input">
+                        <option value="opus">Claude Opus 4.6 — 최고 성능</option>
+                        <option value="sonnet">Claude Sonnet 4 — 균형</option>
+                        <option value="haiku">Claude Haiku 3.5 — 빠른 응답</option>
+                    </select>
+                    <div class="setting-desc">Claude CLI에서 사용할 모델</div>
+                </div>
+                <div class="setting-group">
+                    <label>최대 입력 길이</label>
+                    <input type="number" id="setting-maxlen" class="setting-input" value="10000" min="100" max="100000">
+                    <div class="setting-desc">메시지 하나의 최대 문자 수</div>
+                </div>
+                <div class="setting-group">
+                    <label>타임아웃 (초)</label>
+                    <input type="number" id="setting-timeout" class="setting-input" value="300" min="30" max="600">
+                    <div class="setting-desc">Claude 응답 최대 대기 시간</div>
+                </div>
+                <div class="setting-group">
+                    <label>대화 히스토리</label>
+                    <button class="btn-danger" id="clear-history-btn">🗑️ 전체 삭제</button>
+                    <div class="setting-desc">모든 대화 기록을 삭제합니다</div>
+                </div>
             </div>
-        </footer>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>
