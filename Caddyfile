@@ -1,0 +1,13 @@
+# Claude Web Gateway — Caddy 리버스 프록시 설정
+# 도메인 설정 후 사용 (Cloudflare Tunnel과 함께)
+
+claude.ecmoce.com {
+    reverse_proxy localhost:8450
+
+    # WebSocket 지원
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @websocket localhost:8450
+}
