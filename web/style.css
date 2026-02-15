@@ -336,8 +336,8 @@ button.toggle-pill {
   background: var(--primary-bg); border-color: var(--primary-border);
   color: var(--primary);
 }
-.toggle-pill .toggle-icon { font-size: 13px; }
-.toggle-pill .toggle-label { line-height: 1; }
+.toggle-pill .toggle-icon { font-size: 13px; pointer-events: none; }
+.toggle-pill .toggle-label { line-height: 1; pointer-events: none; }
 
 .input-area {
   padding: 0 24px 20px; flex-shrink: 0;

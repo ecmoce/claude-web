@@ -289,6 +289,11 @@ async def websocket_chat(ws: WebSocket):
     try:
         while True:
             data = await ws.receive_json()
+            # Ping/pong keepalive
+            if data.get("type") == "ping":
+                await ws.send_json({"type": "pong"})
+                continue
+
             message = data.get("message", "").strip()
             file_ids = data.get("file_ids", [])
             conv_id = data.get("conversation_id")

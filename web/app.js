@@ -248,17 +248,47 @@
   }
 
   // ── WEBSOCKET ───────────────────────────────
+  let wsRetryDelay = 1000;
+  let wsPingInterval = null;
+  let wsReconnectTimer = null;
+
   function connectWS() {
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${proto}//${location.host}/ws`);
-    ws.onopen = () => { connIndicator.classList.add('connected'); connText.textContent = '연결됨'; };
-    ws.onmessage = e => handleWS(JSON.parse(e.data));
+    try { ws = new WebSocket(`${proto}//${location.host}/ws`); } catch(e) { scheduleReconnect(); return; }
+
+    ws.onopen = () => {
+      connIndicator.classList.add('connected'); connText.textContent = '연결됨';
+      wsRetryDelay = 1000;
+      if (wsPingInterval) clearInterval(wsPingInterval);
+      wsPingInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({type: 'ping'})); } catch(e) {}
+        }
+      }, 30000);
+    };
+    ws.onmessage = e => { try { handleWS(JSON.parse(e.data)); } catch(ex) {} };
     ws.onclose = () => {
       connIndicator.classList.remove('connected'); connText.textContent = '재연결 중...';
-      setTimeout(connectWS, 3000);
+      if (wsPingInterval) { clearInterval(wsPingInterval); wsPingInterval = null; }
+      scheduleReconnect();
     };
-    ws.onerror = () => showToast('WebSocket 연결 오류');
+    ws.onerror = () => {};
   }
+
+  function scheduleReconnect() {
+    if (wsReconnectTimer) return;
+    wsReconnectTimer = setTimeout(() => { wsReconnectTimer = null; connectWS(); }, wsRetryDelay);
+    wsRetryDelay = Math.min(wsRetryDelay * 1.5, 30000);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
+      wsRetryDelay = 1000; connectWS();
+    }
+  });
 
   function handleWS(data) {
     switch (data.type) {
