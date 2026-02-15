@@ -24,9 +24,6 @@
   const fileInput = $('file-input');
   const filePreviewArea = $('file-preview-area');
 
-  const toggleWebSearch = $('toggle-web-search');
-  const toggleDeepResearch = $('toggle-deep-research');
-
   let ws = null;
   let isStreaming = false;
   let currentMsgEl = null;
@@ -480,19 +477,21 @@
     searchTimeout = setTimeout(() => handleSearch(e.target.value), 300);
   });
 
-  // ── TOGGLE HANDLERS ──────────────────────
-  toggleWebSearch.addEventListener('click', () => {
-    webSearchEnabled = !webSearchEnabled;
-    toggleWebSearch.classList.toggle('active', webSearchEnabled);
-    // 딥 리서치 ON이면 웹 검색은 자동 포함
-  });
-  toggleDeepResearch.addEventListener('click', () => {
-    deepResearchEnabled = !deepResearchEnabled;
-    toggleDeepResearch.classList.toggle('active', deepResearchEnabled);
-    // 딥 리서치 ON이면 웹 검색도 자동 ON
-    if (deepResearchEnabled && !webSearchEnabled) {
-      webSearchEnabled = true;
-      toggleWebSearch.classList.add('active');
+  // ── TOGGLE HANDLERS (이벤트 위임) ──────────
+  document.addEventListener('click', e => {
+    const pill = e.target.closest('.toggle-pill');
+    if (!pill) return;
+    e.preventDefault();
+    if (pill.id === 'toggle-web-search') {
+      webSearchEnabled = !webSearchEnabled;
+      pill.classList.toggle('active', webSearchEnabled);
+    } else if (pill.id === 'toggle-deep-research') {
+      deepResearchEnabled = !deepResearchEnabled;
+      pill.classList.toggle('active', deepResearchEnabled);
+      if (deepResearchEnabled && !webSearchEnabled) {
+        webSearchEnabled = true;
+        $('toggle-web-search')?.classList.add('active');
+      }
     }
   });
 
