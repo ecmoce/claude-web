@@ -136,7 +136,10 @@
 
             <!-- 입력 영역 -->
             <div class="input-area">
+                <div class="file-preview-area" id="file-preview-area"></div>
                 <div class="input-box">
+                    <button class="btn-attach" id="attach-btn" title="파일 첨부">📎</button>
+                    <input type="file" id="file-input" multiple hidden accept=".txt,.py,.js,.ts,.md,.json,.csv,.yaml,.yml,.html,.css,.xml,.log,.sh,.sql,.java,.go,.rs,.c,.cpp,.h,.rb,.php,.swift,.kt,.toml,.cfg,.ini,.env,.pdf,.png,.jpg,.jpeg,.gif,.webp">
                     <textarea id="input" placeholder="메시지를 입력하세요..." rows="1"></textarea>
                     <div class="input-actions">
                         <span class="char-counter" id="char-count">0</span>

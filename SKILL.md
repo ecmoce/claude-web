@@ -135,6 +135,26 @@ SESSION_TTL_HOURS=24        # 세션 유효 시간
 
 ## API Spec
 
+### POST /api/upload
+파일 업로드. `multipart/form-data`로 `file` 필드 전송.
+
+**허용 확장자:** .txt, .py, .js, .ts, .md, .json, .csv, .yaml, .yml, .html, .css, .xml, .log, .sh, .sql, .java, .go, .rs, .c, .cpp, .h, .rb, .php, .swift, .kt, .toml, .cfg, .ini, .env, .pdf, .png, .jpg, .jpeg, .gif, .webp
+
+**최대 크기:** 10MB
+
+```json
+// Response
+{ "file_id": "abc123def456.py", "filename": "main.py", "size": 1234, "is_image": false }
+```
+
+### GET /api/uploads/{file_id}
+업로드된 파일 조회 (이미지 미리보기용).
+
+### 대화 영속성
+- 서버 대화 히스토리가 `data/conversations/{user}.json`에 자동 저장
+- 서버 재시작 후에도 유지
+- `data/` 디렉토리는 `.gitignore`에 포함
+
 ### GET /auth/login
 GitHub OAuth 로그인 리다이렉트
 

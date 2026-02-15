@@ -23,6 +23,10 @@
   const sidebar = $('sidebar');
   const welcome = $('welcome');
 
+  const attachBtn = $('attach-btn');
+  const fileInput = $('file-input');
+  const filePreviewArea = $('file-preview-area');
+
   let ws = null;
   let isStreaming = false;
   let currentMsgEl = null;
@@ -30,6 +34,7 @@
   let conversations = {};
   let activeConvId = null;
   let currentModel = 'opus';
+  let pendingFiles = []; // {file_id, filename, size, is_image}
 
   // marked 설정
   marked.setOptions({
@@ -126,7 +131,7 @@
       messages.innerHTML = getWelcomeHTML();
       return;
     }
-    conv.messages.forEach(m => addMessageEl(m.role, m.content, m.time, m.elapsed));
+    conv.messages.forEach(m => addMessageEl(m.role, m.content, m.time, m.elapsed, m.files));
     scrollToBottom();
   }
 
@@ -145,7 +150,7 @@
   }
 
   // ── MESSAGE UI ──────────────────────────────
-  function addMessageEl(role, content, time, elapsed) {
+  function addMessageEl(role, content, time, elapsed, files) {
     // Remove welcome
     const w = messages.querySelector('.welcome');
     if (w) w.remove();
@@ -157,12 +162,24 @@
     const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 
     const isUser = role === 'user';
+
+    // File attachments HTML
+    let filesHtml = '';
+    if (files && files.length) {
+      const badges = files.map(f => {
+        if (f.is_image) return `<img class="msg-file-img" src="/api/uploads/${f.file_id}" alt="${escapeHtml(f.filename)}" title="${escapeHtml(f.filename)}">`;
+        return `<span class="msg-file-badge">📄 ${escapeHtml(f.filename)}</span>`;
+      }).join('');
+      filesHtml = `<div class="msg-files">${badges}</div>`;
+    }
+
     el.innerHTML = `
       <div class="msg-header">
         <div class="msg-avatar ${isUser ? 'user-a' : 'bot-a'}">${isUser ? '👤' : 'C'}</div>
         <span class="msg-name">${isUser ? 'You' : 'Claude'}</span>
         <span class="msg-time">${timeStr}</span>
       </div>
+      ${filesHtml}
       <div class="msg-content">${isUser ? escapeHtml(content) : renderMarkdown(content)}</div>
       ${elapsed ? `<div class="msg-footer">⏱ ${elapsed}초</div>` : ''}
     `;
@@ -270,33 +287,79 @@
         }
         currentMsgEl = null; streamBuffer = '';
         statusText.textContent = `✅ 완료 (${data.elapsed}초)`;
-        sendBtn.disabled = !input.value.trim();
+        updateSendState();
         scrollToBottom();
         break;
       case 'error':
         isStreaming = false;
         showToast(data.content);
         statusText.textContent = '❌ 오류';
-        sendBtn.disabled = !input.value.trim();
+        updateSendState();
         break;
     }
+  }
+
+  // ── FILE UPLOAD ──────────────────────────────
+  async function uploadFile(file) {
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) { showToast(`파일 크기 초과: ${file.name} (최대 10MB)`); return null; }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const r = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (!r.ok) { const d = await r.json(); showToast(d.detail || '업로드 실패'); return null; }
+      return await r.json();
+    } catch (e) { showToast('업로드 오류: ' + e.message); return null; }
+  }
+
+  async function handleFiles(files) {
+    for (const file of files) {
+      const result = await uploadFile(file);
+      if (result) {
+        pendingFiles.push(result);
+        renderFilePreview();
+      }
+    }
+    updateSendState();
+  }
+
+  function renderFilePreview() {
+    filePreviewArea.innerHTML = pendingFiles.map((f, i) => {
+      const sizeStr = f.size < 1024 ? f.size + 'B' : f.size < 1048576 ? (f.size/1024).toFixed(1) + 'KB' : (f.size/1048576).toFixed(1) + 'MB';
+      const thumb = f.is_image ? `<img class="file-thumb" src="/api/uploads/${f.file_id}" alt="">` : `<span class="file-icon">📄</span>`;
+      return `<div class="file-preview">
+        ${thumb}
+        <div class="file-info"><span class="file-name">${escapeHtml(f.filename)}</span><span class="file-size">${sizeStr}</span></div>
+        <button class="file-remove" data-idx="${i}">✕</button>
+      </div>`;
+    }).join('');
+  }
+
+  function updateSendState() {
+    sendBtn.disabled = (!input.value.trim() && !pendingFiles.length) || isStreaming;
   }
 
   // ── SEND ────────────────────────────────────
   function sendMessage(text) {
     text = text || input.value.trim();
-    if (!text || isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const fileIds = pendingFiles.map(f => f.file_id);
+    const fileInfos = [...pendingFiles];
+
+    if ((!text && !fileIds.length) || isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
 
     // Ensure conversation exists
     if (!activeConvId || !conversations[activeConvId]) createConversation();
 
-    conversations[activeConvId].messages.push({ role: 'user', content: text, time: Date.now() });
+    conversations[activeConvId].messages.push({ role: 'user', content: text, time: Date.now(), files: fileInfos.length ? fileInfos : undefined });
     saveConversations();
 
-    addMessageEl('user', text, Date.now());
-    ws.send(JSON.stringify({ message: text, model: currentModel }));
+    addMessageEl('user', text, Date.now(), null, fileInfos);
+    ws.send(JSON.stringify({ message: text, model: currentModel, file_ids: fileIds.length ? fileIds : undefined }));
     input.value = ''; input.style.height = 'auto';
     charCount.textContent = '0';
+    pendingFiles = [];
+    filePreviewArea.innerHTML = '';
     sendBtn.disabled = true;
   }
 
@@ -339,11 +402,34 @@
 
   // ── EVENT HANDLERS ──────────────────────────
 
+  // File attach
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => { if (fileInput.files.length) { handleFiles(fileInput.files); fileInput.value = ''; } });
+  filePreviewArea.addEventListener('click', e => {
+    const btn = e.target.closest('.file-remove');
+    if (btn) { pendingFiles.splice(parseInt(btn.dataset.idx), 1); renderFilePreview(); updateSendState(); }
+  });
+
+  // Drag & drop
+  let dragCounter = 0;
+  document.addEventListener('dragenter', e => { e.preventDefault(); dragCounter++; if (dragCounter === 1) showDragOverlay(); });
+  document.addEventListener('dragleave', e => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; hideDragOverlay(); } });
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => { e.preventDefault(); dragCounter = 0; hideDragOverlay(); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+
+  function showDragOverlay() {
+    if (document.getElementById('drag-overlay')) return;
+    const o = document.createElement('div'); o.id = 'drag-overlay'; o.className = 'drag-overlay';
+    o.innerHTML = '<span>📎 파일을 드롭하여 첨부</span>';
+    document.body.appendChild(o);
+  }
+  function hideDragOverlay() { document.getElementById('drag-overlay')?.remove(); }
+
   // Input
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 150) + 'px';
-    sendBtn.disabled = !input.value.trim() || isStreaming;
+    updateSendState();
     charCount.textContent = input.value.length.toLocaleString();
   });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
