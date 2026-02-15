@@ -40,10 +40,12 @@ Secure web interface for Claude CLI (Opus) — exposes a minimal HTTPS endpoint 
 - 포트 443만 외부 노출 (라우터 포트포워딩)
 - 내부 서버는 127.0.0.1:8450 바인딩 (외부 직접 접근 불가)
 
-### 2. Authentication
-- Bearer token 인증 (환경변수 `CLAUDE_WEB_TOKEN`)
-- 토큰 없는 요청 즉시 거부 (401)
-- 선택: TOTP 2FA 추가 가능
+### 2. Authentication (GitHub OAuth)
+- GitHub OAuth App 로그인 (Authorization Code Flow)
+- 허용 사용자: `ecmoce` 만 접근 가능 (`ALLOWED_USERS` 환경변수)
+- 로그인 후 서버 발급 JWT 세션 토큰 (HttpOnly, Secure, SameSite=Strict)
+- 미인증 요청 → GitHub 로그인 페이지로 리다이렉트
+- 세션 만료: 24시간, 갱신 가능
 
 ### 3. Rate Limiting
 - IP당 분당 10회 요청 제한
@@ -68,7 +70,7 @@ Secure web interface for Claude CLI (Opus) — exposes a minimal HTTPS endpoint 
 | Reverse Proxy | Caddy | 자동 HTTPS, 설정 간단 |
 | Frontend | Vanilla HTML/CSS/JS | 의존성 최소화 |
 | Process | asyncio.subprocess | non-blocking CLI 실행 |
-| Auth | Bearer token + argon2 | 안전한 토큰 해싱 |
+| Auth | GitHub OAuth + JWT | ecmoce만 허용, 세션 관리 |
 | DDNS | Cloudflare Tunnel 또는 duckdns | 동적 IP 대응 |
 
 ## File Structure
@@ -79,7 +81,7 @@ claude-web/
 ├── README.md             # 프로젝트 설명
 ├── server/
 │   ├── main.py           # FastAPI 앱
-│   ├── auth.py           # 토큰 인증 미들웨어
+│   ├── auth.py           # GitHub OAuth + JWT 세션
 │   ├── claude_runner.py  # Claude CLI 실행기
 │   ├── rate_limit.py     # 속도 제한
 │   ├── config.py         # 설정 (env vars)
@@ -97,7 +99,50 @@ claude-web/
     └── security.md       # 보안 설계 상세
 ```
 
+## Auth Flow (GitHub OAuth)
+
+```
+1. 사용자 → GET /
+   └─ 세션 없음 → 302 → GitHub OAuth authorize URL
+
+2. GitHub → 사용자 로그인 + 권한 승인
+   └─ 302 → GET /auth/callback?code=xxx
+
+3. 서버 → GitHub API로 code → access_token 교환
+   └─ GET https://api.github.com/user (토큰으로 사용자 정보 조회)
+   └─ login == "ecmoce" 확인
+   └─ ❌ 불일치 → 403 Forbidden ("접근 권한 없음")
+   └─ ✅ 일치 → JWT 생성, Set-Cookie (HttpOnly, Secure, SameSite=Strict)
+   └─ 302 → /
+
+4. 이후 요청: Cookie의 JWT 검증 → 만료/무효 시 다시 1번
+```
+
+### 환경변수
+```bash
+GITHUB_CLIENT_ID=xxx        # GitHub OAuth App Client ID
+GITHUB_CLIENT_SECRET=xxx    # GitHub OAuth App Client Secret
+ALLOWED_USERS=ecmoce        # 쉼표 구분, 허용 GitHub 사용자
+JWT_SECRET=xxx              # JWT 서명 키 (랜덤 생성)
+SESSION_TTL_HOURS=24        # 세션 유효 시간
+```
+
+### GitHub OAuth App 설정
+- GitHub Settings → Developer settings → OAuth Apps → New
+- Homepage URL: `https://your-domain.com`
+- Callback URL: `https://your-domain.com/auth/callback`
+- Scope: `read:user` (최소 권한)
+
 ## API Spec
+
+### GET /auth/login
+GitHub OAuth 로그인 리다이렉트
+
+### GET /auth/callback
+OAuth 콜백 — 토큰 교환, 사용자 검증, JWT 발급
+
+### GET /auth/logout
+세션 쿠키 삭제, 로그아웃
 
 ### POST /api/chat
 ```json
