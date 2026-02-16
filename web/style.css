@@ -319,6 +319,48 @@ pre:hover .copy-btn { opacity: 1; }
 
 /* ─── INPUT AREA ────────────────────────────── */
 
+/* ── Thinking Animation ── */
+.thinking-status {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; margin: 8px 0;
+  background: linear-gradient(135deg, var(--primary-bg), #f0e6ff);
+  border: 1px solid var(--primary-border); border-radius: var(--radius);
+  animation: thinking-pulse 2s ease-in-out infinite;
+}
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.thinking-animation {
+  display: flex; align-items: center; gap: 8px;
+}
+.thinking-brain {
+  font-size: 20px;
+  animation: thinking-bounce 1.5s ease-in-out infinite;
+}
+@keyframes thinking-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.thinking-text {
+  font-size: 13px; font-weight: 600; color: var(--primary);
+}
+.thinking-dots span {
+  font-size: 16px; font-weight: 700; color: var(--primary);
+  animation: thinking-dot 1.4s infinite;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinking-dot {
+  0%, 20% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.thinking-timer {
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Toggle Checks ── */
 .input-toggles {
   display: flex; gap: 12px; margin-bottom: 8px;

@@ -34,6 +34,9 @@
   let pendingFiles = [];
   let webSearchEnabled = true;   // 기본 ON
   let deepResearchEnabled = false; // 기본 OFF
+  let streamStartTime = 0;
+  let firstChunkReceived = false;
+  let thinkingTimer = null;
 
   marked.setOptions({
     highlight: (code, lang) => {
@@ -294,7 +297,7 @@
     switch (data.type) {
       case 'connected': break;
       case 'start':
-        isStreaming = true; streamBuffer = '';
+        isStreaming = true; streamBuffer = ''; streamStartTime = Date.now(); firstChunkReceived = false;
         // Update activeConvId from server
         if (data.conversation_id) {
           activeConvId = data.conversation_id;
@@ -306,22 +309,38 @@
         }
         currentMsgEl = addMessageEl('assistant', '', Date.now());
         const ti = document.createElement('div');
-        ti.className = 'typing-indicator';
-        ti.innerHTML = '<span></span><span></span><span></span>';
+        ti.className = 'thinking-status';
+        ti.innerHTML = '<div class="thinking-animation"><div class="thinking-brain">🧠</div><span class="thinking-text">Thinking</span><span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="thinking-timer">0s</div>';
         currentMsgEl.appendChild(ti);
-        statusText.textContent = '⏳ Claude 응답 중...';
+        // 경과 시간 타이머
+        if (thinkingTimer) clearInterval(thinkingTimer);
+        thinkingTimer = setInterval(() => {
+          const el = currentMsgEl?.querySelector('.thinking-timer');
+          if (el) {
+            const sec = Math.floor((Date.now() - streamStartTime) / 1000);
+            el.textContent = sec < 60 ? `${sec}s` : `${Math.floor(sec/60)}m ${sec%60}s`;
+          }
+        }, 1000);
+        statusText.textContent = '🧠 Claude 생각 중...';
         sendBtn.disabled = true;
         break;
       case 'chunk':
         streamBuffer += data.content;
-        const ind = currentMsgEl?.querySelector('.typing-indicator');
+        if (!firstChunkReceived) {
+          firstChunkReceived = true;
+          if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
+          const elapsed = ((Date.now() - streamStartTime) / 1000).toFixed(1);
+          statusText.textContent = `✍️ 응답 작성 중... (thinking ${elapsed}s)`;
+        }
+        const ind = currentMsgEl?.querySelector('.thinking-status');
         if (ind) ind.remove();
         updateStreamContent(currentMsgEl, streamBuffer);
         scrollToBottom();
         break;
       case 'done':
         isStreaming = false;
-        const ti2 = currentMsgEl?.querySelector('.typing-indicator');
+        if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
+        const ti2 = currentMsgEl?.querySelector('.thinking-status');
         if (ti2) ti2.remove();
         updateStreamContent(currentMsgEl, streamBuffer);
         const footer = document.createElement('div');
@@ -337,9 +356,13 @@
         break;
       case 'status':
         statusText.textContent = data.content;
+        // Update thinking box text if visible
+        const thinkText = currentMsgEl?.querySelector('.thinking-text');
+        if (thinkText) thinkText.textContent = data.content;
         break;
       case 'error':
         isStreaming = false;
+        if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
         showToast(data.content);
         statusText.textContent = '❌ 오류';
         updateSendState();
