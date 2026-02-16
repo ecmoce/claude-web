@@ -310,7 +310,7 @@
         currentMsgEl = addMessageEl('assistant', '', Date.now());
         const ti = document.createElement('div');
         ti.className = 'thinking-status';
-        ti.innerHTML = '<div class="thinking-animation"><div class="thinking-brain">🧠</div><span class="thinking-text">Thinking</span><span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="thinking-timer">0s</div>';
+        ti.innerHTML = '<div class="thinking-animation"><div class="thinking-icon">🔆</div><span class="thinking-text">Thinking</span><span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="thinking-timer">0s</div>';
         currentMsgEl.appendChild(ti);
         // 경과 시간 타이머
         if (thinkingTimer) clearInterval(thinkingTimer);
@@ -321,7 +321,7 @@
             el.textContent = sec < 60 ? `${sec}s` : `${Math.floor(sec/60)}m ${sec%60}s`;
           }
         }, 1000);
-        statusText.textContent = '🧠 Claude 생각 중...';
+        statusText.textContent = '🔆 Claude 생각 중...';
         sendBtn.disabled = true;
         break;
       case 'chunk':

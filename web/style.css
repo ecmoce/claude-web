@@ -334,13 +334,13 @@ pre:hover .copy-btn { opacity: 1; }
 .thinking-animation {
   display: flex; align-items: center; gap: 8px;
 }
-.thinking-brain {
+.thinking-icon {
   font-size: 20px;
-  animation: thinking-bounce 1.5s ease-in-out infinite;
+  animation: thinking-glow 2s ease-in-out infinite;
 }
-@keyframes thinking-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
+@keyframes thinking-glow {
+  0%, 100% { opacity: 0.6; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); }
 }
 .thinking-text {
   font-size: 13px; font-weight: 600; color: var(--primary);
