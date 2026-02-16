@@ -285,13 +285,36 @@ async def websocket_chat(ws: WebSocket):
 
     await ws.send_json({"type": "connected", "username": username})
     logger.info("WebSocket 연결: %s", username)
+    
+    # 현재 Claude 프로세스 (권한 요청 처리용)
+    current_process = None
 
     try:
         while True:
             data = await ws.receive_json()
+            
             # Ping/pong keepalive
             if data.get("type") == "ping":
                 await ws.send_json({"type": "pong"})
+                continue
+            
+            # 권한 응답 처리
+            if data.get("type") == "permission_response":
+                if current_process:
+                    tool_use_id = data.get("tool_use_id")
+                    allowed = data.get("allowed", False)
+                    await current_process.send_permission_response(tool_use_id, allowed)
+                continue
+            
+            # 슬래시 명령어 처리
+            if data.get("type") == "slash_command":
+                command = data.get("command", "").strip()
+                if current_process:
+                    slash_message = {
+                        "type": "user",
+                        "message": {"role": "user", "content": command}
+                    }
+                    await current_process._write_json(slash_message)
                 continue
 
             message = data.get("message", "").strip()
@@ -299,6 +322,7 @@ async def websocket_chat(ws: WebSocket):
             conv_id = data.get("conversation_id")
             web_search_enabled = data.get("web_search", False)
             deep_research_enabled = data.get("deep_research", False)
+            model = data.get("model")
 
             if not message and not file_ids:
                 await ws.send_json({"type": "error", "content": "Empty message"})
@@ -356,9 +380,110 @@ async def websocket_chat(ws: WebSocket):
             await ws.send_json({"type": "start", "conversation_id": conv_id})
 
             full_response = []
-            async for chunk in stream_claude(message, file_ids if file_ids else None, UPLOAD_DIR, search_context):
-                full_response.append(chunk)
-                await ws.send_json({"type": "chunk", "content": chunk})
+            current_process = None
+            
+            # stream-json 모드로 Claude 실행
+            from server.claude_runner import ClaudeProcess
+            current_process = ClaudeProcess()
+            
+            try:
+                await current_process.start(message, file_ids if file_ids else None, 
+                                          UPLOAD_DIR, search_context, model)
+                
+                async for event in current_process.read_output():
+                    event_type = event.get("type")
+                    
+                    if event_type == "system":
+                        # 초기화 정보
+                        subtype = event.get("subtype")
+                        if subtype == "init":
+                            session_id = event.get("session_id")
+                            await ws.send_json({
+                                "type": "system_init", 
+                                "session_id": session_id,
+                                "model": event.get("model"),
+                                "tools": event.get("tools", [])
+                            })
+                    
+                    elif event_type == "assistant":
+                        # Assistant 메시지 (텍스트 또는 도구 사용)
+                        msg_content = event.get("message", {}).get("content", [])
+                        
+                        for content_item in msg_content:
+                            if content_item.get("type") == "tool_use":
+                                # 도구 사용 요청
+                                tool_use_id = content_item.get("id")
+                                tool_name = content_item.get("name")
+                                tool_input = content_item.get("input", {})
+                                
+                                await ws.send_json({
+                                    "type": "tool_use",
+                                    "tool_use_id": tool_use_id,
+                                    "tool_name": tool_name,
+                                    "tool_input": tool_input,
+                                    "description": tool_input.get("description", "")
+                                })
+                            
+                            elif content_item.get("type") == "text":
+                                # 일반 텍스트 응답
+                                text = content_item.get("text", "")
+                                full_response.append(text)
+                                await ws.send_json({"type": "chunk", "content": text})
+                    
+                    elif event_type == "user":
+                        # 도구 결과 (권한 요청 포함 가능)
+                        msg_content = event.get("message", {}).get("content", [])
+                        
+                        for content_item in msg_content:
+                            if content_item.get("type") == "tool_result":
+                                tool_use_id = content_item.get("tool_use_id")
+                                content = content_item.get("content", "")
+                                is_error = content_item.get("is_error", False)
+                                
+                                if is_error and "requested permissions" in content:
+                                    # 권한 요청
+                                    await ws.send_json({
+                                        "type": "permission_request",
+                                        "tool_use_id": tool_use_id,
+                                        "content": content
+                                    })
+                                else:
+                                    # 일반 도구 결과
+                                    await ws.send_json({
+                                        "type": "tool_result",
+                                        "tool_use_id": tool_use_id,
+                                        "content": content,
+                                        "is_error": is_error
+                                    })
+                    
+                    elif event_type == "result":
+                        # 최종 결과
+                        result_text = event.get("result", "")
+                        permission_denials = event.get("permission_denials", [])
+                        
+                        if result_text and result_text not in full_response:
+                            full_response.append(result_text)
+                        
+                        await ws.send_json({
+                            "type": "final_result",
+                            "content": result_text,
+                            "permission_denials": permission_denials,
+                            "total_cost": event.get("total_cost_usd"),
+                            "usage": event.get("usage")
+                        })
+                        break
+                    
+                    elif event_type == "error":
+                        await ws.send_json({"type": "error", "content": event.get("content", "Unknown error")})
+                        break
+
+            except Exception as e:
+                logger.error("Claude stream 에러: %s", e)
+                await ws.send_json({"type": "error", "content": str(e)})
+            finally:
+                if current_process:
+                    await current_process.close()
+                current_process = None
 
             elapsed = round(time.time() - start, 2)
             complete_text = "".join(full_response)
@@ -377,8 +502,12 @@ async def websocket_chat(ws: WebSocket):
     except WebSocketDisconnect:
         logger.info("WebSocket 종료: %s", username)
         # 스트리밍 중 끊김 — 부분 응답 저장하지 않음
+        if current_process:
+            await current_process.close()
     except Exception as e:
         logger.error("WebSocket 에러: %s", e)
+        if current_process:
+            await current_process.close()
         try:
             await ws.send_json({"type": "error", "content": str(e)})
         except Exception:

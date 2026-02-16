@@ -324,6 +324,43 @@
         statusText.textContent = '🔆 Claude 생각 중...';
         sendBtn.disabled = true;
         break;
+      
+      case 'system_init':
+        // Claude CLI 초기화 정보
+        const sessionId = data.session_id;
+        const model = data.model;
+        const tools = data.tools || [];
+        statusText.textContent = `🚀 Claude ${model} 시작 (세션: ${sessionId?.slice(0, 8)}...)`;
+        break;
+        
+      case 'tool_use':
+        // 도구 사용 요청
+        if (!firstChunkReceived) {
+          firstChunkReceived = true;
+          if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
+          const elapsed = ((Date.now() - streamStartTime) / 1000).toFixed(1);
+          statusText.textContent = `🔧 도구 실행 중... (thinking ${elapsed}s)`;
+        }
+        const ind = currentMsgEl?.querySelector('.thinking-status');
+        if (ind) ind.remove();
+        
+        addToolUseBlock(currentMsgEl, data);
+        scrollToBottom();
+        break;
+        
+      case 'tool_result':
+        // 도구 실행 결과
+        updateToolResult(data.tool_use_id, data.content, data.is_error);
+        statusText.textContent = data.is_error ? '⚠️ 도구 실행 오류' : '✅ 도구 실행 완료';
+        scrollToBottom();
+        break;
+        
+      case 'permission_request':
+        // 권한 요청
+        showPermissionRequest(data.tool_use_id, data.content);
+        statusText.textContent = '🔐 권한 요청 대기 중...';
+        break;
+        
       case 'chunk':
         streamBuffer += data.content;
         if (!firstChunkReceived) {
@@ -332,11 +369,26 @@
           const elapsed = ((Date.now() - streamStartTime) / 1000).toFixed(1);
           statusText.textContent = `✍️ 응답 작성 중... (thinking ${elapsed}s)`;
         }
-        const ind = currentMsgEl?.querySelector('.thinking-status');
-        if (ind) ind.remove();
+        const ind2 = currentMsgEl?.querySelector('.thinking-status');
+        if (ind2) ind2.remove();
         updateStreamContent(currentMsgEl, streamBuffer);
         scrollToBottom();
         break;
+        
+      case 'final_result':
+        // 최종 결과 및 비용 정보
+        if (data.content && data.content !== streamBuffer) {
+          streamBuffer += data.content;
+          updateStreamContent(currentMsgEl, streamBuffer);
+        }
+        if (data.total_cost) {
+          const costInfo = document.createElement('div');
+          costInfo.className = 'msg-cost';
+          costInfo.textContent = `💰 $${data.total_cost.toFixed(4)}`;
+          currentMsgEl?.appendChild(costInfo);
+        }
+        break;
+        
       case 'done':
         isStreaming = false;
         if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
@@ -354,12 +406,14 @@
         updateSendState();
         scrollToBottom();
         break;
+        
       case 'status':
         statusText.textContent = data.content;
         // Update thinking box text if visible
         const thinkText = currentMsgEl?.querySelector('.thinking-text');
         if (thinkText) thinkText.textContent = data.content;
         break;
+        
       case 'error':
         isStreaming = false;
         if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
@@ -367,6 +421,125 @@
         statusText.textContent = '❌ 오류';
         updateSendState();
         break;
+    }
+  }
+  
+  // ── 도구 사용 UI ──────────────────────────────────
+  function addToolUseBlock(msgEl, toolData) {
+    if (!msgEl) return;
+    
+    const toolBlock = document.createElement('div');
+    toolBlock.className = 'tool-use-block';
+    toolBlock.dataset.toolUseId = toolData.tool_use_id;
+    
+    const toolName = toolData.tool_name;
+    const toolInput = toolData.tool_input || {};
+    const description = toolData.description || '';
+    
+    let toolDetails = '';
+    if (toolName === 'Bash') {
+      toolDetails = `<div class="tool-command">$ ${escapeHtml(toolInput.command || '')}</div>`;
+    } else if (toolName === 'Write' || toolName === 'Edit') {
+      const filePath = toolInput.file_path || toolInput.path || '';
+      toolDetails = `<div class="tool-file">📝 ${escapeHtml(filePath)}</div>`;
+    } else if (toolName === 'Read') {
+      const filePath = toolInput.file_path || toolInput.path || '';
+      toolDetails = `<div class="tool-file">👁 ${escapeHtml(filePath)}</div>`;
+    } else {
+      toolDetails = `<div class="tool-generic">${escapeHtml(JSON.stringify(toolInput))}</div>`;
+    }
+    
+    toolBlock.innerHTML = `
+      <div class="tool-header">
+        <span class="tool-icon">🔧</span>
+        <span class="tool-name">${escapeHtml(toolName)}</span>
+        <span class="tool-status">실행 중...</span>
+      </div>
+      ${toolDetails}
+      ${description ? `<div class="tool-description">${escapeHtml(description)}</div>` : ''}
+      <div class="tool-result-area"></div>
+    `;
+    
+    msgEl.appendChild(toolBlock);
+  }
+  
+  function updateToolResult(toolUseId, content, isError) {
+    const toolBlock = document.querySelector(`[data-tool-use-id="${toolUseId}"]`);
+    if (!toolBlock) return;
+    
+    const status = toolBlock.querySelector('.tool-status');
+    const resultArea = toolBlock.querySelector('.tool-result-area');
+    
+    if (status) {
+      status.textContent = isError ? '실행 실패' : '실행 완료';
+      status.className = `tool-status ${isError ? 'error' : 'success'}`;
+    }
+    
+    if (resultArea && content) {
+      const resultDiv = document.createElement('div');
+      resultDiv.className = `tool-result ${isError ? 'error' : 'success'}`;
+      resultDiv.innerHTML = `<pre><code>${escapeHtml(content)}</code></pre>`;
+      resultArea.appendChild(resultDiv);
+    }
+  }
+  
+  // ── 권한 요청 UI ──────────────────────────────────
+  function showPermissionRequest(toolUseId, content) {
+    // 기존 권한 요청 제거
+    const existing = document.querySelector('.permission-request');
+    if (existing) existing.remove();
+    
+    const permReq = document.createElement('div');
+    permReq.className = 'permission-request';
+    permReq.innerHTML = `
+      <div class="perm-header">
+        <span class="perm-icon">🔐</span>
+        <span class="perm-title">권한 요청</span>
+      </div>
+      <div class="perm-content">${escapeHtml(content)}</div>
+      <div class="perm-actions">
+        <button class="perm-btn allow" data-tool-use-id="${toolUseId}">허용</button>
+        <button class="perm-btn deny" data-tool-use-id="${toolUseId}">거부</button>
+        <button class="perm-btn always" data-tool-use-id="${toolUseId}">이 세션에서 항상 허용</button>
+      </div>
+      <div class="perm-timer">30초 후 자동 거부</div>
+    `;
+    
+    document.body.appendChild(permReq);
+    
+    // 30초 타이머
+    let countdown = 30;
+    const timer = permReq.querySelector('.perm-timer');
+    const timerInterval = setInterval(() => {
+      countdown--;
+      if (countdown <= 0) {
+        clearInterval(timerInterval);
+        sendPermissionResponse(toolUseId, false);
+        permReq.remove();
+      } else {
+        timer.textContent = `${countdown}초 후 자동 거부`;
+      }
+    }, 1000);
+    
+    // 버튼 이벤트
+    permReq.addEventListener('click', (e) => {
+      const btn = e.target.closest('.perm-btn');
+      if (!btn) return;
+      
+      clearInterval(timerInterval);
+      const allowed = btn.classList.contains('allow') || btn.classList.contains('always');
+      sendPermissionResponse(toolUseId, allowed);
+      permReq.remove();
+    });
+  }
+  
+  function sendPermissionResponse(toolUseId, allowed) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'permission_response',
+        tool_use_id: toolUseId,
+        allowed: allowed
+      }));
     }
   }
 
@@ -423,6 +596,20 @@
     const fileInfos = [...pendingFiles];
 
     if ((!text && !fileIds.length) || isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // 슬래시 명령어 처리
+    if (text.startsWith('/')) {
+      addMessageEl('user', text, Date.now(), null, fileInfos);
+      ws.send(JSON.stringify({
+        type: 'slash_command',
+        command: text
+      }));
+      input.value = ''; input.style.height = 'auto';
+      charCount.textContent = '0';
+      pendingFiles = [];
+      filePreviewArea.innerHTML = '';
+      return;
+    }
 
     if (!activeConvId) activeConvId = newConvId();
 

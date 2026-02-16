@@ -1,5 +1,6 @@
-"""Claude CLI 실행기 — asyncio.subprocess 기반, 스트리밍 출력, 파일 첨부 지원."""
+"""Claude CLI 실행기 — stream-json 모드, 양방향 통신, 권한 요청 지원."""
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -19,6 +20,140 @@ TEXT_EXTENSIONS = {
     ".c", ".cpp", ".h", ".rb", ".php", ".swift", ".kt", ".toml", ".cfg",
     ".ini", ".env", ".pdf",
 }
+
+class ClaudeProcess:
+    """Claude CLI 프로세스 관리 클래스"""
+    def __init__(self):
+        self.proc = None
+        self.session_id = None
+        self.permission_handlers = {}  # tool_use_id -> callback
+        
+    async def start(self, message: str, file_ids: list[str] | None = None, 
+                   upload_dir: Path | None = None, search_context: str | None = None,
+                   model: str | None = None):
+        """Claude CLI를 stream-json 모드로 시작"""
+        _upload_dir = upload_dir or Path("/tmp")
+        full_message = _build_message_with_files(message, file_ids, _upload_dir)
+        images = _get_image_files(file_ids, _upload_dir)
+
+        # 웹 검색/딥 리서치 컨텍스트 주입
+        if search_context:
+            full_message = search_context + "\n\n---\n\n[사용자 질문]\n" + full_message
+
+        cmd = [
+            CLAUDE_CMD,
+            "--print",
+            "--output-format", "stream-json",
+            "--input-format", "stream-json",
+            "--verbose",
+            "--model", model or CLAUDE_MODEL
+        ]
+        
+        # 이미지 파일 추가
+        for img in images:
+            cmd.extend(["--file", img])
+
+        logger.info("Claude 실행: %s (model=%s, files=%s)", 
+                   " ".join(cmd), model or CLAUDE_MODEL, file_ids)
+
+        self.proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        
+        # 첫 메시지 전송
+        initial_message = {
+            "type": "user",
+            "message": {"role": "user", "content": full_message}
+        }
+        await self._write_json(initial_message)
+        
+    async def _write_json(self, data: dict):
+        """stdin에 JSON 라인 전송"""
+        if not self.proc or not self.proc.stdin:
+            return
+        try:
+            json_line = json.dumps(data, ensure_ascii=False) + "\n"
+            self.proc.stdin.write(json_line.encode('utf-8'))
+            await self.proc.stdin.drain()
+        except Exception as e:
+            logger.error("stdin 쓰기 실패: %s", e)
+    
+    async def read_output(self):
+        """stdout에서 JSON 라인 스트림 읽기"""
+        if not self.proc or not self.proc.stdout:
+            return
+            
+        byte_buffer = b""
+        try:
+            while True:
+                chunk = await asyncio.wait_for(
+                    self.proc.stdout.read(8192),
+                    timeout=CLAUDE_TIMEOUT,
+                )
+                if not chunk:
+                    break
+                    
+                byte_buffer += chunk
+                
+                # 줄 단위로 처리
+                while b"\n" in byte_buffer:
+                    line, byte_buffer = byte_buffer.split(b"\n", 1)
+                    if line.strip():
+                        try:
+                            text_line = line.decode('utf-8')
+                            data = json.loads(text_line)
+                            yield data
+                        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                            logger.warning("JSON 파싱 실패: %s", e)
+                            continue
+                            
+            # 프로세스 종료 대기
+            await asyncio.wait_for(self.proc.wait(), timeout=10)
+            
+        except asyncio.TimeoutError:
+            logger.error("Claude CLI 타임아웃")
+            if self.proc:
+                self.proc.kill()
+                await self.proc.wait()
+            yield {"type": "error", "content": "타임아웃 (300초 초과)"}
+        except Exception as e:
+            logger.error("Claude CLI 에러: %s", e)
+            yield {"type": "error", "content": str(e)}
+    
+    async def send_permission_response(self, tool_use_id: str, allowed: bool):
+        """권한 요청에 대한 응답 전송"""
+        # 여러 가지 형식을 시도해보자
+        # 형식 1: {"type":"permission","permission":{"tool_use_id":"...","allowed":true}}
+        response = {
+            "type": "permission",
+            "permission": {
+                "tool_use_id": tool_use_id,
+                "allowed": allowed
+            }
+        }
+        await self._write_json(response)
+        logger.info("권한 응답 전송: %s -> %s", tool_use_id, allowed)
+    
+    async def close(self):
+        """프로세스 종료"""
+        if self.proc:
+            try:
+                if self.proc.stdin:
+                    self.proc.stdin.close()
+                    await self.proc.stdin.wait_closed()
+            except Exception:
+                pass
+            
+            if self.proc.returncode is None:
+                self.proc.terminate()
+                try:
+                    await asyncio.wait_for(self.proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    self.proc.kill()
+                    await self.proc.wait()
 
 
 def _build_message_with_files(message: str, file_ids: list[str] | None, upload_dir: Path) -> str:
@@ -67,86 +202,35 @@ def _get_image_files(file_ids: list[str] | None, upload_dir: Path) -> list[str]:
 
 
 async def run_claude(message: str, file_ids: list[str] | None = None, upload_dir: Path | None = None) -> str:
-    """Claude CLI를 실행하고 전체 응답을 반환."""
+    """Claude CLI를 실행하고 전체 응답을 반환 (비스트리밍, 하위 호환용)."""
     async with _semaphore:
         return await _execute(message, file_ids, upload_dir)
 
 
 async def stream_claude(message: str, file_ids: list[str] | None = None, upload_dir: Path | None = None,
-                        search_context: str | None = None):
-    """Claude CLI를 실행하고 청크 단위로 yield (WebSocket용)."""
+                        search_context: str | None = None, model: str | None = None):
+    """Claude CLI를 stream-json 모드로 실행하고 이벤트 단위로 yield."""
     async with _semaphore:
-        _upload_dir = upload_dir or Path("/tmp")
-        full_message = _build_message_with_files(message, file_ids, _upload_dir)
-        images = _get_image_files(file_ids, _upload_dir)
-
-        # 웹 검색/딥 리서치 컨텍스트 주입
-        if search_context:
-            full_message = search_context + "\n\n---\n\n[사용자 질문]\n" + full_message
-
-        cmd = [CLAUDE_CMD, "--print", "--model", CLAUDE_MODEL]
-        # 이미지 파일 추가
-        for img in images:
-            cmd.extend(["--file", img])
-        cmd.append(full_message)
-
-        logger.info("Claude 실행: %s %s (files=%s)", CLAUDE_CMD, CLAUDE_MODEL, file_ids)
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
+        proc = ClaudeProcess()
         try:
-            assert proc.stdout is not None
-            byte_buffer = b""
-            while True:
-                chunk = await asyncio.wait_for(
-                    proc.stdout.read(1024),
-                    timeout=CLAUDE_TIMEOUT,
-                )
-                if not chunk:
-                    # flush remaining bytes
-                    if byte_buffer:
-                        yield byte_buffer.decode("utf-8", errors="replace")
-                    break
-                byte_buffer += chunk
-                # decode only complete UTF-8 characters
-                try:
-                    text = byte_buffer.decode("utf-8")
-                    byte_buffer = b""
-                    yield text
-                except UnicodeDecodeError:
-                    # find last valid UTF-8 boundary
-                    for i in range(len(byte_buffer) - 1, max(len(byte_buffer) - 4, -1), -1):
-                        try:
-                            text = byte_buffer[:i].decode("utf-8")
-                            byte_buffer = byte_buffer[i:]
-                            if text:
-                                yield text
-                            break
-                        except UnicodeDecodeError:
-                            continue
-
-            await asyncio.wait_for(proc.wait(), timeout=10)
-
-            if proc.returncode != 0 and proc.stderr:
-                stderr = await proc.stderr.read()
-                err_msg = stderr.decode("utf-8", errors="replace").strip()
-                if err_msg:
-                    logger.error("Claude stderr: %s", err_msg)
-                    yield f"\n\n[Error: {err_msg}]"
-
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            yield "\n\n[Error: 타임아웃 (300초 초과)]"
-            logger.error("Claude 타임아웃")
+            await proc.start(message, file_ids, upload_dir, search_context, model)
+            
+            async for event in proc.read_output():
+                # 세션 ID 추출 (첫 번째 init 메시지에서)
+                if event.get("type") == "system" and event.get("subtype") == "init":
+                    proc.session_id = event.get("session_id")
+                
+                yield event
+                
+        except Exception as e:
+            logger.error("stream_claude 에러: %s", e)
+            yield {"type": "error", "content": str(e)}
+        finally:
+            await proc.close()
 
 
 async def _execute(message: str, file_ids: list[str] | None = None, upload_dir: Path | None = None) -> str:
-    """Claude CLI 실행 후 전체 출력 반환."""
+    """Claude CLI 실행 후 전체 출력 반환 (기존 --print 모드, 하위 호환용)."""
     _upload_dir = upload_dir or Path("/tmp")
     full_message = _build_message_with_files(message, file_ids, _upload_dir)
     images = _get_image_files(file_ids, _upload_dir)

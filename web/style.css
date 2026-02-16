@@ -538,6 +538,109 @@ pre:hover .copy-btn { opacity: 1; }
   border: 1px solid var(--border);
 }
 
+/* ─── TOOL USE BLOCKS ───────────────────────── */
+
+.tool-use-block {
+  margin: 12px 0; padding: 12px; border-radius: 10px;
+  background: var(--code-bg); border: 1px solid var(--border);
+}
+
+.tool-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.tool-icon { font-size: 16px; }
+.tool-name { font-weight: 600; color: var(--text); font-size: 14px; }
+.tool-status { 
+  margin-left: auto; font-size: 12px; padding: 2px 8px;
+  border-radius: 4px; font-weight: 500;
+}
+.tool-status.success { background: var(--green-bg); color: var(--green); }
+.tool-status.error { background: rgba(239,68,68,0.1); color: var(--red); }
+
+.tool-command, .tool-file, .tool-generic {
+  background: var(--white); border: 1px solid var(--border-light);
+  border-radius: 6px; padding: 8px; font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px; color: var(--text);
+}
+.tool-command { background: #1e1e1e; color: #d4d4d4; }
+
+.tool-description {
+  font-size: 12px; color: var(--text-secondary); margin-top: 6px;
+  font-style: italic;
+}
+
+.tool-result-area { margin-top: 8px; }
+.tool-result {
+  border-radius: 6px; padding: 8px; font-size: 12px;
+}
+.tool-result.success { 
+  background: var(--green-bg); border: 1px solid rgba(16,185,129,0.2);
+}
+.tool-result.error { 
+  background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2);
+}
+.tool-result pre {
+  margin: 0; white-space: pre-wrap; word-break: break-all;
+}
+.tool-result code {
+  font-family: 'Consolas', 'Monaco', monospace; font-size: 12px;
+}
+
+/* ─── PERMISSION REQUESTS ───────────────────── */
+
+.permission-request {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: var(--white); border-radius: var(--radius); padding: 24px;
+  box-shadow: var(--shadow-lg); z-index: 200; min-width: 400px; max-width: 600px;
+  border: 2px solid var(--primary-border);
+}
+
+.perm-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 16px;
+}
+.perm-icon { font-size: 20px; }
+.perm-title { font-size: 18px; font-weight: 700; color: var(--text); }
+
+.perm-content {
+  background: var(--bg); border-radius: 8px; padding: 12px;
+  font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;
+  color: var(--text); white-space: pre-wrap; margin-bottom: 20px;
+  border: 1px solid var(--border);
+}
+
+.perm-actions {
+  display: flex; gap: 10px; margin-bottom: 12px;
+}
+.perm-btn {
+  padding: 10px 16px; border-radius: 8px; border: none;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: var(--transition); font-family: var(--font);
+}
+.perm-btn.allow {
+  background: var(--green); color: white;
+}
+.perm-btn.allow:hover { background: #059669; }
+.perm-btn.deny {
+  background: var(--red); color: white;
+}
+.perm-btn.deny:hover { background: #dc2626; }
+.perm-btn.always {
+  background: var(--primary); color: white;
+}
+.perm-btn.always:hover { background: var(--primary-light); }
+
+.perm-timer {
+  text-align: center; font-size: 12px; color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ─── COST INFO ─────────────────────────────── */
+
+.msg-cost {
+  padding-left: 36px; margin-top: 8px; font-size: 12px;
+  color: var(--text-muted); font-family: 'Consolas', 'Monaco', monospace;
+}
+
 /* ─── SCROLLBAR ─────────────────────────────── */
 
 ::-webkit-scrollbar { width: 6px; }
