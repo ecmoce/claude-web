@@ -376,6 +376,7 @@ async def websocket_chat(ws: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("WebSocket 종료: %s", username)
+        # 스트리밍 중 끊김 — 부분 응답 저장하지 않음
     except Exception as e:
         logger.error("WebSocket 에러: %s", e)
         try:

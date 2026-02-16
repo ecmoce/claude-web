@@ -100,14 +100,34 @@ async def stream_claude(message: str, file_ids: list[str] | None = None, upload_
 
         try:
             assert proc.stdout is not None
+            byte_buffer = b""
             while True:
                 chunk = await asyncio.wait_for(
                     proc.stdout.read(1024),
                     timeout=CLAUDE_TIMEOUT,
                 )
                 if not chunk:
+                    # flush remaining bytes
+                    if byte_buffer:
+                        yield byte_buffer.decode("utf-8", errors="replace")
                     break
-                yield chunk.decode("utf-8", errors="replace")
+                byte_buffer += chunk
+                # decode only complete UTF-8 characters
+                try:
+                    text = byte_buffer.decode("utf-8")
+                    byte_buffer = b""
+                    yield text
+                except UnicodeDecodeError:
+                    # find last valid UTF-8 boundary
+                    for i in range(len(byte_buffer) - 1, max(len(byte_buffer) - 4, -1), -1):
+                        try:
+                            text = byte_buffer[:i].decode("utf-8")
+                            byte_buffer = byte_buffer[i:]
+                            if text:
+                                yield text
+                            break
+                        except UnicodeDecodeError:
+                            continue
 
             await asyncio.wait_for(proc.wait(), timeout=10)
 

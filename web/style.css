@@ -389,7 +389,7 @@ pre:hover .copy-btn { opacity: 1; }
 
 .input-box textarea {
   flex: 1; border: none; outline: none; resize: none; font-family: var(--font);
-  font-size: 15px; line-height: 1.5; color: var(--text); background: none;
+  font-size: 16px; line-height: 1.5; color: var(--text); background: none;
   max-height: 150px;
 }
 .input-box textarea::placeholder { color: var(--text-muted); }
