@@ -46,6 +46,7 @@ class ClaudeProcess:
             "--output-format", "stream-json",
             "--input-format", "stream-json",
             "--verbose",
+            "--permission-mode", "acceptEdits",
             "--model", model or CLAUDE_MODEL
         ]
         
@@ -126,16 +127,43 @@ class ClaudeProcess:
     async def send_permission_response(self, tool_use_id: str, allowed: bool):
         """권한 요청에 대한 응답 전송"""
         # 여러 가지 형식을 시도해보자
-        # 형식 1: {"type":"permission","permission":{"tool_use_id":"...","allowed":true}}
-        response = {
-            "type": "permission",
-            "permission": {
+        formats_to_try = [
+            # 형식 1: {"type":"permission","permission":{"tool_use_id":"...","allowed":true}}
+            {
+                "type": "permission",
+                "permission": {
+                    "tool_use_id": tool_use_id,
+                    "allowed": allowed
+                }
+            },
+            # 형식 2: {"type":"permission","tool_use_id":"...","allowed":true}
+            {
+                "type": "permission",
+                "tool_use_id": tool_use_id,
+                "allowed": allowed
+            },
+            # 형식 3: {"type":"user","permission":{"tool_use_id":"...","allowed":true}}
+            {
+                "type": "user",
+                "permission": {
+                    "tool_use_id": tool_use_id,
+                    "allowed": allowed
+                }
+            },
+            # 형식 4: {"type":"tool_permission","tool_use_id":"...","allowed":true}
+            {
+                "type": "tool_permission",
                 "tool_use_id": tool_use_id,
                 "allowed": allowed
             }
-        }
-        await self._write_json(response)
-        logger.info("권한 응답 전송: %s -> %s", tool_use_id, allowed)
+        ]
+        
+        # 모든 형식을 시도
+        for i, response in enumerate(formats_to_try, 1):
+            await self._write_json(response)
+            logger.info("권한 응답 형식 %d 전송: %s -> %s", i, tool_use_id, allowed)
+            # 약간의 지연 추가
+            await asyncio.sleep(0.1)
     
     async def close(self):
         """프로세스 종료"""
