@@ -273,9 +273,16 @@
       }, 30000);
     };
     ws.onmessage = e => { try { handleWS(JSON.parse(e.data)); } catch(ex) {} };
-    ws.onclose = () => {
-      connIndicator.classList.remove('connected'); connText.textContent = '재연결 중...';
+    ws.onclose = (e) => {
+      connIndicator.classList.remove('connected');
       if (wsPingInterval) { clearInterval(wsPingInterval); wsPingInterval = null; }
+      if (e.code === 4001) {
+        // 인증 실패 — 재연결하지 않고 로그인으로
+        connText.textContent = '인증 만료';
+        showLogin();
+        return;
+      }
+      connText.textContent = '재연결 중...';
       scheduleReconnect();
     };
     ws.onerror = () => {};
@@ -417,6 +424,7 @@
       case 'error':
         isStreaming = false;
         if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
+        if (data.content === 'Not authenticated') return; // 4001 close에서 처리
         showToast(data.content);
         statusText.textContent = '❌ 오류';
         updateSendState();
