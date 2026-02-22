@@ -70,7 +70,7 @@
 
   async function loadVersion() {
     try {
-      const r = await fetch('/health');
+      const r = await fetch('/api/health');
       const d = await r.json();
       const vi = $('version-info');
       if (vi && d.version) vi.textContent = `v${d.version}`;
