@@ -294,6 +294,16 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); -web
 .msg-content h1, .msg-content h2, .msg-content h3 { margin: 16px 0 8px; }
 .msg-content a { color: var(--primary); }
 
+.msg-actions {
+  padding-left: 36px; margin-top: 4px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s;
+}
+.message:hover .msg-actions { opacity: 1; }
+.msg-action-btn {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px;
+  cursor: pointer; color: var(--text-muted); transition: var(--transition); display: flex; align-items: center;
+}
+.msg-action-btn:hover { background: var(--primary-bg); color: var(--primary); border-color: var(--primary); }
+
 .msg-footer {
   padding-left: 36px; margin-top: 8px; font-size: 11px; color: var(--text-muted);
   display: flex; align-items: center; gap: 12px;

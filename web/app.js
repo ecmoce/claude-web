@@ -293,8 +293,26 @@
       </div>
       ${filesHtml}
       <div class="msg-content">${isUser ? escapeHtml(content) : renderMarkdown(content)}</div>
+      <div class="msg-actions">
+        <button class="msg-action-btn msg-copy-btn" title="복사">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+      </div>
       ${elapsed ? `<div class="msg-footer">⏱ ${elapsed}초</div>` : ''}
     `;
+
+    // 메시지 전체 복사
+    el.querySelector('.msg-copy-btn')?.addEventListener('click', () => {
+      const raw = el.querySelector('.msg-content')?.innerText || content;
+      navigator.clipboard.writeText(raw).then(() => {
+        const btn = el.querySelector('.msg-copy-btn');
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+        setTimeout(() => {
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+        }, 2000);
+      });
+    });
+
     messages.appendChild(el);
     if (!isUser) addCopyButtons(el);
     scrollToBottom();
