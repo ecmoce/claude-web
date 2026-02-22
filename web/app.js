@@ -61,10 +61,20 @@
   function showApp(username, devMode) {
     loginScreen.classList.add('hidden');
     app.classList.remove('hidden');
-    userAvatar.textContent = username[0].toUpperCase();
+    userAvatar.innerHTML = '<img src="/static/user-avatar.jpg" alt="User" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">';
     userName.textContent = devMode ? '🔧 DEV' : `@${username}`;
+    loadVersion();
     loadConversations();
     connectWS();
+  }
+
+  async function loadVersion() {
+    try {
+      const r = await fetch('/health');
+      const d = await r.json();
+      const vi = $('version-info');
+      if (vi && d.version) vi.textContent = `v${d.version}`;
+    } catch {}
   }
 
   // ── CONVERSATIONS (서버 API) ─────────────────
@@ -202,7 +212,7 @@
 
     el.innerHTML = `
       <div class="msg-header">
-        <div class="msg-avatar ${isUser ? 'user-a' : 'bot-a'}">${isUser ? '👤' : 'C'}</div>
+        <div class="msg-avatar ${isUser ? 'user-a' : 'bot-a'}">${isUser ? '<img src="/static/user-avatar.jpg" alt="User">' : '<img src="/static/claude-icon.svg" alt="Claude">'}</div>
         <span class="msg-name">${isUser ? 'You' : 'Claude'}</span>
         <span class="msg-time">${timeStr}</span>
       </div>
