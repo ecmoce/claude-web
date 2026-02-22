@@ -31,6 +31,8 @@
   let conversations = []; // [{id, title, created_at, updated_at}]
   let activeConvId = null;
   let currentModel = 'opus';
+  let currentProvider = 'claude';
+  let providers = [];
   let pendingFiles = [];
   let webSearchEnabled = true;   // 기본 ON
   let deepResearchEnabled = false; // 기본 OFF
@@ -64,6 +66,7 @@
     userAvatar.innerHTML = '<img src="/static/user-avatar.jpg" alt="User" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">';
     userName.textContent = devMode ? '🔧 DEV' : `@${username}`;
     loadVersion();
+    loadProviders();
     loadConversations();
     connectWS();
   }
@@ -75,6 +78,78 @@
       const vi = $('version-info');
       if (vi && d.version) vi.textContent = `v${d.version}`;
     } catch {}
+  }
+
+  async function loadProviders() {
+    try {
+      const r = await fetch('/api/providers');
+      const d = await r.json();
+      providers = d.providers || [];
+      rebuildModelSelect();
+    } catch { /* fallback: use hardcoded Claude options */ }
+  }
+
+  function rebuildModelSelect() {
+    if (!providers.length) return;
+    // Header model select
+    modelSelect.innerHTML = '';
+    // Settings model select
+    const settingModel = $('setting-model');
+    if (settingModel) settingModel.innerHTML = '';
+
+    providers.forEach(p => {
+      if (!p.enabled) return;
+      const group = document.createElement('optgroup');
+      group.label = p.name;
+      const settingGroup = document.createElement('optgroup');
+      settingGroup.label = p.name;
+
+      p.models.forEach(m => {
+        const val = `${p.id}/${m.id}`;
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = m.name;
+        group.appendChild(opt);
+
+        if (settingModel) {
+          const opt2 = document.createElement('option');
+          opt2.value = val;
+          opt2.textContent = `${m.name} — ${m.desc}`;
+          settingGroup.appendChild(opt2);
+        }
+      });
+      modelSelect.appendChild(group);
+      if (settingModel) settingModel.appendChild(settingGroup);
+    });
+
+    // Set default
+    const defaultProvider = providers.find(p => p.enabled) || providers[0];
+    if (defaultProvider) {
+      const defaultVal = `${defaultProvider.id}/${defaultProvider.default_model}`;
+      modelSelect.value = defaultVal;
+      if (settingModel) settingModel.value = defaultVal;
+      applyModelSelection(defaultVal);
+    }
+  }
+
+  function getProviderIcon() {
+    const p = providers.find(p => p.id === currentProvider);
+    return p ? p.icon : '/static/claude-icon.svg';
+  }
+
+  function getProviderName() {
+    const p = providers.find(p => p.id === currentProvider);
+    return p ? p.name : 'Claude';
+  }
+
+  function applyModelSelection(val) {
+    const [prov, model] = val.split('/');
+    currentProvider = prov;
+    currentModel = model;
+    // Update provider icon
+    const icon = $('provider-icon');
+    const provData = providers.find(p => p.id === prov);
+    if (icon && provData) icon.src = provData.icon;
   }
 
   // ── CONVERSATIONS (서버 API) ─────────────────
@@ -212,8 +287,8 @@
 
     el.innerHTML = `
       <div class="msg-header">
-        <div class="msg-avatar ${isUser ? 'user-a' : 'bot-a'}">${isUser ? '<img src="/static/user-avatar.jpg" alt="User">' : '<img src="/static/claude-icon.svg" alt="Claude">'}</div>
-        <span class="msg-name">${isUser ? 'You' : 'Claude'}</span>
+        <div class="msg-avatar ${isUser ? 'user-a' : 'bot-a'}">${isUser ? '<img src="/static/user-avatar.jpg" alt="User">' : `<img src="${getProviderIcon()}" alt="AI">`}</div>
+        <span class="msg-name">${isUser ? 'You' : getProviderName()}</span>
         <span class="msg-time">${timeStr}</span>
       </div>
       ${filesHtml}
@@ -633,7 +708,7 @@
 
     addMessageEl('user', text, Date.now(), null, fileInfos);
     ws.send(JSON.stringify({
-      message: text, model: currentModel,
+      message: text, provider: currentProvider, model: currentModel,
       file_ids: fileIds.length ? fileIds : undefined,
       conversation_id: activeConvId,
       web_search: webSearchEnabled,
@@ -716,7 +791,11 @@
     if (card) sendMessage(card.dataset.prompt);
   });
 
-  modelSelect.addEventListener('change', () => { currentModel = modelSelect.value; });
+  modelSelect.addEventListener('change', () => {
+    applyModelSelection(modelSelect.value);
+    const sm = $('setting-model');
+    if (sm) sm.value = modelSelect.value;
+  });
 
   $('settings-btn').addEventListener('click', () => { settingsModal.classList.remove('hidden'); });
   $('settings-close').addEventListener('click', () => { settingsModal.classList.add('hidden'); });
@@ -758,8 +837,8 @@
   });
 
   $('setting-model')?.addEventListener('change', e => {
-    currentModel = e.target.value;
-    modelSelect.value = currentModel;
+    applyModelSelection(e.target.value);
+    modelSelect.value = e.target.value;
   });
 
   checkAuth();

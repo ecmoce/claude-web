@@ -120,7 +120,6 @@ async def health():
     # Claude CLI 가용성 체크
     claude_available = True
     try:
-        # 간단한 버전 체크로 Claude CLI 가용성 확인
         proc = await asyncio.create_subprocess_exec(
             CLAUDE_CMD, "--version",
             stdout=asyncio.subprocess.PIPE,
@@ -132,6 +131,23 @@ async def health():
         claude_available = False
     
     return HealthResponse(claude_available=claude_available)
+
+
+@app.get("/api/providers")
+async def get_providers():
+    """사용 가능한 LLM 프로바이더 및 모델 목록 반환."""
+    from server.config import LLM_PROVIDERS
+    providers = []
+    for pid, p in LLM_PROVIDERS.items():
+        providers.append({
+            "id": pid,
+            "name": p["name"],
+            "icon": p["icon"],
+            "models": p["models"],
+            "default_model": p["default_model"],
+            "enabled": p["enabled"],
+        })
+    return {"providers": providers}
 
 
 # ── 인증 라우트 ───────────────────────────────────────

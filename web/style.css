@@ -215,6 +215,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); -web
   padding: 4px 8px; border-radius: 8px; transition: var(--transition);
 }
 .model-select:hover { background: var(--bg); }
+.provider-icon { width: 20px; height: 20px; border-radius: 4px; flex-shrink: 0; }
+.header-model { display: flex; align-items: center; gap: 6px; }
 
 .header-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
 .conn-indicator { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
