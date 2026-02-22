@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="Claude Web Gateway", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Claude Web Gateway", version="0.3.4", lifespan=lifespan)
 
 # 보안 미들웨어
 @app.middleware("http")
