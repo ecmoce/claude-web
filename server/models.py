@@ -25,5 +25,5 @@ class UserInfo(BaseModel):
 class HealthResponse(BaseModel):
     """헬스체크 응답."""
     status: str = "ok"
-    version: str = "0.3.0"
+    version: str = "0.4.0"
     claude_available: bool = True
