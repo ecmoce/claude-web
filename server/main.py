@@ -5,6 +5,7 @@ import json
 import secrets
 import logging
 import uuid
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -12,7 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from server.config import HOST, PORT, BASE_URL
+from server.config import HOST, PORT, BASE_URL, CLAUDE_CMD
 from server.auth import (
     login_url, exchange_code, create_session_token,
     get_current_user, set_session_cookie, clear_session_cookie,
@@ -41,6 +42,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Claude Web Gateway", version="0.3.0", lifespan=lifespan)
 
+# 보안 미들웨어
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    response = await call_next(request)
+    # 보안 헤더 추가
+    if not DEV_MODE:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' fonts.googleapis.com cdnjs.cloudflare.com; font-src 'self' fonts.gstatic.com; img-src 'self' data:; connect-src 'self' wss:;"
+    return response
+
 # 정적 파일 서빙 (web/ 디렉토리)
 web_dir = Path(__file__).parent.parent / "web"
 if web_dir.exists():
@@ -59,8 +74,18 @@ ALLOWED_EXTENSIONS = {
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
-# OAuth state 저장
+# OAuth state 저장 (자동 만료 처리)
 _oauth_states: dict[str, float] = {}
+
+def cleanup_expired_states():
+    """만료된 OAuth state 정리"""
+    current_time = time.time()
+    expired = [state for state, timestamp in _oauth_states.items() 
+               if current_time - timestamp > 600]  # 10분 후 만료
+    for state in expired:
+        _oauth_states.pop(state, None)
+    if expired:
+        logger.info("OAuth state 정리: %d개 만료된 상태 제거", len(expired))
 
 
 def _get_user(request: Request) -> str | None:
@@ -92,7 +117,21 @@ async def index():
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health():
-    return HealthResponse()
+    # Claude CLI 가용성 체크
+    claude_available = True
+    try:
+        # 간단한 버전 체크로 Claude CLI 가용성 확인
+        proc = await asyncio.create_subprocess_exec(
+            CLAUDE_CMD, "--version",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=5)
+        claude_available = proc.returncode == 0
+    except Exception:
+        claude_available = False
+    
+    return HealthResponse(claude_available=claude_available)
 
 
 # ── 인증 라우트 ───────────────────────────────────────
@@ -113,6 +152,10 @@ async def auth_login():
         token = create_session_token("dev-user")
         set_session_cookie(response, token)
         return response
+    
+    # 만료된 상태 정리
+    cleanup_expired_states()
+    
     state = secrets.token_urlsafe(32)
     _oauth_states[state] = time.time()
     redirect_uri = f"{BASE_URL}/auth/callback"
@@ -177,12 +220,31 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
 @app.get("/api/uploads/{file_id}")
 async def get_upload(file_id: str, request: Request):
     _require_user(request)
-    if "/" in file_id or "\\" in file_id or ".." in file_id:
-        raise HTTPException(status_code=400, detail="잘못된 파일 ID")
+    
+    # 더 엄격한 파일 ID 검증
+    import re
+    if not re.match(r'^[a-f0-9]{12}\.[a-zA-Z0-9]{1,10}$', file_id):
+        raise HTTPException(status_code=400, detail="잘못된 파일 ID 형식")
+    
     file_path = UPLOAD_DIR / file_id
-    if not file_path.exists() or not file_path.resolve().parent == UPLOAD_DIR.resolve():
+    if not file_path.exists():
         raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
-    return FileResponse(file_path)
+    
+    # 경로 검증
+    try:
+        resolved_path = file_path.resolve()
+        upload_dir_resolved = UPLOAD_DIR.resolve()
+        if not str(resolved_path).startswith(str(upload_dir_resolved)):
+            raise HTTPException(status_code=400, detail="접근 권한이 없습니다")
+    except Exception:
+        raise HTTPException(status_code=400, detail="파일 접근 오류")
+    
+    # 보안 헤더 추가
+    from fastapi.responses import FileResponse
+    response = FileResponse(file_path)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
 
 
 # ── Conversations API ────────────────────────────────
@@ -270,6 +332,16 @@ async def api_chat(req: ChatRequest, request: Request):
 
 # WebSocket 세션별 프로세스 관리
 active_processes = {}
+
+async def cleanup_websocket_process(session_key: str):
+    """WebSocket 프로세스 안전한 정리"""
+    if session_key in active_processes:
+        try:
+            process = active_processes.pop(session_key)
+            if process:
+                await process.close()
+        except Exception as e:
+            logger.warning("WebSocket 프로세스 정리 중 오류: %s", e)
 
 @app.websocket("/ws")
 async def websocket_chat(ws: WebSocket):
@@ -512,17 +584,19 @@ async def websocket_chat(ws: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("WebSocket 종료: %s", username)
-        # 스트리밍 중 끊김 — 부분 응답 저장하지 않음
-        if current_process:
-            await current_process.close()
     except Exception as e:
         logger.error("WebSocket 에러: %s", e)
-        if current_process:
-            await current_process.close()
         try:
-            await ws.send_json({"type": "error", "content": str(e)})
+            await ws.send_json({"type": "error", "content": "연결 오류가 발생했습니다"})
         except Exception:
             pass
+    finally:
+        # 프로세스 안전한 정리
+        if current_process:
+            try:
+                await current_process.close()
+            except Exception as e:
+                logger.warning("WebSocket 종료 중 프로세스 정리 오류: %s", e)
 
 
 # ── 서버 실행 ────────────────────────────────────────

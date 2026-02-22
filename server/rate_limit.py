@@ -1,30 +1,56 @@
 """Rate limiting — IP당 분당 10회, 토큰당 시간당 60회."""
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from fastapi import Request, HTTPException
+import logging
 
+logger = logging.getLogger(__name__)
 
 class RateLimiter:
-    """슬라이딩 윈도우 기반 레이트 리미터."""
+    """슬라이딩 윈도우 기반 레이트 리미터 (deque 최적화)."""
 
     def __init__(self):
-        # {key: [timestamp, ...]}
-        self._hits: dict[str, list[float]] = defaultdict(list)
+        # {key: deque([timestamp, ...])}
+        self._hits: dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
+        self._last_cleanup = time.time()
 
     def _clean(self, key: str, window: float):
-        """만료된 타임스탬프 제거."""
+        """만료된 타임스탬프 제거 (deque의 왼쪽부터)."""
         now = time.time()
-        self._hits[key] = [t for t in self._hits[key] if now - t < window]
+        hits = self._hits[key]
+        
+        # deque의 왼쪽부터 만료된 항목 제거
+        while hits and now - hits[0] >= window:
+            hits.popleft()
+
+    def _global_cleanup(self):
+        """주기적으로 비어있는 키 정리"""
+        now = time.time()
+        if now - self._last_cleanup > 300:  # 5분마다
+            empty_keys = [k for k, v in self._hits.items() if not v]
+            for k in empty_keys:
+                del self._hits[k]
+            if empty_keys:
+                logger.info("Rate limiter cleanup: %d empty keys removed", len(empty_keys))
+            self._last_cleanup = now
 
     def check(self, key: str, window: float, limit: int):
         """제한 초과 시 HTTPException 발생."""
         self._clean(key, window)
+        
         if len(self._hits[key]) >= limit:
+            # 다음 허용 시간 계산
+            oldest_hit = self._hits[key][0] if self._hits[key] else time.time()
+            retry_after = int(window - (time.time() - oldest_hit)) + 1
+            
             raise HTTPException(
                 status_code=429,
-                detail=f"Rate limit exceeded. Try again later.",
+                detail="Rate limit exceeded. Try again later.",
+                headers={"Retry-After": str(retry_after)}
             )
+        
         self._hits[key].append(time.time())
+        self._global_cleanup()
 
 
 # 싱글턴 인스턴스

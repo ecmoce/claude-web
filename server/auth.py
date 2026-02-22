@@ -2,12 +2,25 @@
 import os, time, secrets, httpx, jwt
 from fastapi import Request, HTTPException, Response
 from fastapi.responses import RedirectResponse
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Config
 GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 ALLOWED_USERS = set(os.environ.get("ALLOWED_USERS", "ecmoce").split(","))
-JWT_SECRET = os.environ.get("JWT_SECRET", secrets.token_hex(32))
+
+# Ensure JWT_SECRET is properly set in production
+_jwt_secret = os.environ.get("JWT_SECRET")
+if not _jwt_secret:
+    if os.environ.get("DEV_MODE", "").lower() in ("true", "1", "yes"):
+        _jwt_secret = secrets.token_hex(32)
+        logger.warning("JWT_SECRET not set - using random secret for dev mode")
+    else:
+        raise ValueError("JWT_SECRET environment variable is required for production")
+
+JWT_SECRET = _jwt_secret
 SESSION_TTL = int(os.environ.get("SESSION_TTL_HOURS", "24")) * 3600
 COOKIE_NAME = "cw_session"
 

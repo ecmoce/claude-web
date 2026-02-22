@@ -14,28 +14,60 @@ SEARXNG_URL = os.environ.get("SEARXNG_URL", "http://127.0.0.1:8888")
 async def brave_search(query: str, count: int = 5) -> list[dict]:
     """Brave Search API로 웹 검색. 결과: [{title, url, snippet}]"""
     if not BRAVE_API_KEY:
+        logger.info("Brave API key not configured, using SearXNG")
         return await searxng_search(query, count)
 
+    # 입력 검증
+    if not query.strip() or len(query) > 500:
+        logger.warning("Invalid search query length: %d", len(query))
+        return []
+    
+    count = min(max(count, 1), 20)  # 1-20 범위로 제한
+
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 BRAVE_SEARCH_URL,
-                params={"q": query, "count": count},
-                headers={"X-Subscription-Token": BRAVE_API_KEY, "Accept": "application/json"},
+                params={
+                    "q": query.strip()[:500],  # 쿼리 길이 제한
+                    "count": count,
+                    "search_lang": "ko",
+                    "country": "KR",
+                    "safesearch": "moderate"
+                },
+                headers={
+                    "X-Subscription-Token": BRAVE_API_KEY, 
+                    "Accept": "application/json",
+                    "User-Agent": "Claude-Web-Gateway/1.0"
+                },
             )
             resp.raise_for_status()
             data = resp.json()
+            
             results = []
             for item in (data.get("web", {}).get("results", []))[:count]:
+                # URL 검증
+                url = item.get("url", "")
+                if not url.startswith(("http://", "https://")):
+                    continue
+                    
                 results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("description", ""),
+                    "title": item.get("title", "")[:200],  # 제목 길이 제한
+                    "url": url,
+                    "snippet": item.get("description", "")[:500],  # 스니펫 길이 제한
                 })
+            
+            logger.info("Brave search success: %d results for query '%s'", len(results), query[:50])
             return results
+            
+    except httpx.HTTPStatusError as e:
+        logger.warning("Brave Search HTTP error %d, fallback to SearXNG: %s", e.response.status_code, e)
+    except httpx.RequestError as e:
+        logger.warning("Brave Search request error, fallback to SearXNG: %s", e)
     except Exception as e:
-        logger.warning("Brave Search 실패, SearXNG fallback: %s", e)
-        return await searxng_search(query, count)
+        logger.error("Brave Search unexpected error, fallback to SearXNG: %s", e)
+        
+    return await searxng_search(query, count)
 
 
 async def searxng_search(query: str, count: int = 5) -> list[dict]:

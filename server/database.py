@@ -61,8 +61,10 @@ async def init_db():
         );
 
         CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
         CREATE INDEX IF NOT EXISTS idx_attachments_msg ON attachments(message_id);
         CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user);
+        CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at DESC);
     """)
 
     # FTS table
@@ -125,12 +127,16 @@ async def update_conversation_title(conv_id: str, title: str):
 
 
 async def get_conversations(user: str) -> list[dict]:
-    db = await get_db()
-    rows = await db.execute_fetchall(
-        "SELECT id, user, title, created_at, updated_at FROM conversations WHERE user=? ORDER BY updated_at DESC",
-        (user,),
-    )
-    return [dict(r) for r in rows]
+    try:
+        db = await get_db()
+        rows = await db.execute_fetchall(
+            "SELECT id, user, title, created_at, updated_at FROM conversations WHERE user=? ORDER BY updated_at DESC LIMIT 100",
+            (user,),
+        )
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error("대화 목록 조회 실패: %s", e)
+        return []
 
 
 async def delete_conversation(conv_id: str, user: str) -> bool:
@@ -166,22 +172,30 @@ async def save_message(conversation_id: str, role: str, content: str, elapsed: f
 
 
 async def get_messages(conversation_id: str) -> list[dict]:
-    db = await get_db()
-    rows = await db.execute_fetchall(
-        "SELECT id, conversation_id, role, content, elapsed, created_at FROM messages WHERE conversation_id=? ORDER BY id",
-        (conversation_id,),
-    )
-    result = []
-    for r in rows:
-        msg = dict(r)
-        # Load attachments
-        att_rows = await db.execute_fetchall(
-            "SELECT id, filename, original_name, mime_type, size FROM attachments WHERE message_id=?",
-            (r["id"],),
+    try:
+        db = await get_db()
+        rows = await db.execute_fetchall(
+            "SELECT id, conversation_id, role, content, elapsed, created_at FROM messages WHERE conversation_id=? ORDER BY id LIMIT 1000",
+            (conversation_id,),
         )
-        msg["files"] = [dict(a) for a in att_rows] if att_rows else []
-        result.append(msg)
-    return result
+        result = []
+        for r in rows:
+            msg = dict(r)
+            # Load attachments
+            try:
+                att_rows = await db.execute_fetchall(
+                    "SELECT id, filename, original_name, mime_type, size FROM attachments WHERE message_id=?",
+                    (r["id"],),
+                )
+                msg["files"] = [dict(a) for a in att_rows] if att_rows else []
+            except Exception as e:
+                logger.warning("첨부파일 로드 실패 (message_id=%s): %s", r["id"], e)
+                msg["files"] = []
+            result.append(msg)
+        return result
+    except Exception as e:
+        logger.error("메시지 조회 실패 (conv_id=%s): %s", conversation_id, e)
+        return []
 
 
 # ── Attachments ────────────────────────────────────

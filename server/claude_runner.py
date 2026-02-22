@@ -85,9 +85,11 @@ class ClaudeProcess:
     async def read_output(self):
         """stdout에서 JSON 라인 스트림 읽기"""
         if not self.proc or not self.proc.stdout:
+            yield {"type": "error", "content": "프로세스가 시작되지 않았습니다"}
             return
             
         byte_buffer = b""
+        line_count = 0
         try:
             while True:
                 chunk = await asyncio.wait_for(
@@ -102,27 +104,45 @@ class ClaudeProcess:
                 # 줄 단위로 처리
                 while b"\n" in byte_buffer:
                     line, byte_buffer = byte_buffer.split(b"\n", 1)
+                    line_count += 1
+                    
+                    # 너무 많은 라인 방지 (DoS 방지)
+                    if line_count > 10000:
+                        logger.error("너무 많은 출력 라인: %d", line_count)
+                        yield {"type": "error", "content": "출력이 너무 깁니다"}
+                        return
+                        
                     if line.strip():
                         try:
-                            text_line = line.decode('utf-8')
+                            text_line = line.decode('utf-8', errors='replace')
                             data = json.loads(text_line)
                             yield data
                         except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                            logger.warning("JSON 파싱 실패: %s", e)
+                            logger.warning("JSON 파싱 실패 (line %d): %s", line_count, e)
+                            # 파싱 실패한 라인 출력 (디버깅용, 처음 100자만)
+                            sample = text_line[:100] + ('...' if len(text_line) > 100 else '')
+                            logger.debug("파싱 실패 라인: %s", sample)
                             continue
                             
             # 프로세스 종료 대기
-            await asyncio.wait_for(self.proc.wait(), timeout=10)
+            try:
+                await asyncio.wait_for(self.proc.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                logger.warning("프로세스 종료 대기 타임아웃")
             
         except asyncio.TimeoutError:
-            logger.error("Claude CLI 타임아웃")
+            logger.error("Claude CLI 타임아웃 (%ds)", CLAUDE_TIMEOUT)
             if self.proc:
-                self.proc.kill()
-                await self.proc.wait()
-            yield {"type": "error", "content": "타임아웃 (300초 초과)"}
+                try:
+                    self.proc.terminate()
+                    await asyncio.wait_for(self.proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    self.proc.kill()
+                    await self.proc.wait()
+            yield {"type": "error", "content": f"타임아웃 ({CLAUDE_TIMEOUT}초 초과)"}
         except Exception as e:
-            logger.error("Claude CLI 에러: %s", e)
-            yield {"type": "error", "content": str(e)}
+            logger.error("Claude CLI 실행 에러: %s", e)
+            yield {"type": "error", "content": f"Claude 실행 오류: {str(e)}"}
     
     async def send_permission_response(self, tool_use_id: str, allowed: bool):
         """권한 요청에 대한 응답 전송"""
