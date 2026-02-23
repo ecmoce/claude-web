@@ -46,7 +46,7 @@ class ClaudeProcess:
             "--output-format", "stream-json",
             "--input-format", "stream-json",
             "--verbose",
-            "--permission-mode", "acceptEdits",
+            "--permission-mode", "bypassPermissions",
             "--model", model or CLAUDE_MODEL
         ]
         
