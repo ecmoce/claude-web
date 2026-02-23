@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="Ask", version="0.3.10", lifespan=lifespan)
+app = FastAPI(title="Ask", version="0.3.11", lifespan=lifespan)
 
 # 보안 미들웨어
 @app.middleware("http")

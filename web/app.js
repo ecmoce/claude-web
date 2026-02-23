@@ -324,6 +324,8 @@
     const body = el.querySelector('.msg-content');
     body.innerHTML = renderMarkdown(content);
     body.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+    // Open all links in new tab
+    body.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
     addCopyButtons(el);
   }
 
@@ -343,6 +345,60 @@
       pre.style.position = 'relative';
       pre.appendChild(btn);
     });
+  }
+
+  function addFollowUpSuggestions(msgEl, responseText) {
+    if (!msgEl || !responseText || responseText.length < 50) return;
+    // Extract key topics from response for follow-up questions
+    const text = responseText.slice(0, 500);
+    const suggestions = generateFollowUps(text);
+    if (!suggestions.length) return;
+
+    const container = document.createElement('div');
+    container.className = 'followup-suggestions';
+    suggestions.forEach(q => {
+      const btn = document.createElement('button');
+      btn.className = 'followup-btn';
+      btn.textContent = q;
+      btn.addEventListener('click', () => {
+        container.remove();
+        sendMessage(q);
+      });
+      container.appendChild(btn);
+    });
+    msgEl.appendChild(container);
+  }
+
+  function generateFollowUps(text) {
+    // Simple heuristic-based follow-up generation
+    const questions = [];
+    const lines = text.split('\n').filter(l => l.trim());
+    
+    // Find key nouns/topics from first few lines
+    const topics = [];
+    for (const line of lines.slice(0, 10)) {
+      // Extract bold text or headers as topics
+      const bolds = line.match(/\*\*([^*]+)\*\*/g);
+      if (bolds) bolds.forEach(b => topics.push(b.replace(/\*\*/g, '')));
+      const headers = line.match(/^#+\s+(.+)/);
+      if (headers) topics.push(headers[1]);
+    }
+
+    // Check content patterns
+    const hasCode = text.includes('```');
+    const hasList = text.includes('- ') || text.includes('1. ');
+    const hasComparison = /vs|비교|차이|장단점/i.test(text);
+
+    if (hasCode) questions.push('이 코드를 더 자세히 설명해줘');
+    if (hasList && topics.length > 0) questions.push(`${topics[0]}에 대해 더 알려줘`);
+    if (hasComparison) questions.push('실제 사용 사례를 알려줘');
+    
+    if (topics.length > 1) questions.push(`${topics[1]}은 어떻게 작동해?`);
+    if (topics.length > 0 && questions.length < 3) questions.push(`${topics[0]}의 장단점은?`);
+    if (questions.length < 3) questions.push('좀 더 쉽게 설명해줘');
+    if (questions.length < 3) questions.push('관련된 예시를 보여줘');
+
+    return questions.slice(0, 3);
   }
 
   function renderMarkdown(text) { try { return marked.parse(text); } catch { return escapeHtml(text); } }
@@ -522,6 +578,8 @@
         footer.className = 'msg-footer';
         footer.textContent = `⏱ ${data.elapsed}초`;
         currentMsgEl?.appendChild(footer);
+        // Follow-up suggestions
+        addFollowUpSuggestions(currentMsgEl, streamBuffer);
         // Refresh conversation list from server
         loadConversationList();
         currentMsgEl = null; streamBuffer = '';
