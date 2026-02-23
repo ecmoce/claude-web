@@ -1,5 +1,5 @@
 /**
- * Claude Web Gateway — 클라이언트 앱 v3 (서버 SQLite 저장소)
+ * Ask — 클라이언트 앱 v3 (서버 SQLite 저장소)
  */
 (() => {
   const $ = id => document.getElementById(id);
