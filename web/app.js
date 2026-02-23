@@ -40,7 +40,14 @@
   let firstChunkReceived = false;
   let thinkingTimer = null;
 
+  const renderer = new marked.Renderer();
+  const origLink = renderer.link.bind(renderer);
+  renderer.link = function({ href, title, text }) {
+    const html = origLink({ href, title, text });
+    return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
+  };
   marked.setOptions({
+    renderer,
     highlight: (code, lang) => {
       if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
       return hljs.highlightAuto(code).value;
