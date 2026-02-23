@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="Ask", version="0.3.9", lifespan=lifespan)
+app = FastAPI(title="Ask", version="0.3.10", lifespan=lifespan)
 
 # 보안 미들웨어
 @app.middleware("http")
@@ -530,12 +530,9 @@ async def websocket_chat(ws: WebSocket):
                                 })
                 
                 elif event_type == "result":
-                    # 최종 결과
+                    # 최종 결과 — don't duplicate if already streamed via chunks
                     result_text = event.get("result", "")
                     permission_denials = event.get("permission_denials", [])
-                    
-                    if result_text and result_text not in full_response:
-                        full_response.append(result_text)
                     
                     await ws.send_json({
                         "type": "final_result",

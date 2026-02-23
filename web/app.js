@@ -494,9 +494,9 @@
         break;
         
       case 'final_result':
-        // 최종 결과 및 비용 정보
-        if (data.content && data.content !== streamBuffer) {
-          streamBuffer += data.content;
+        // 최종 결과 및 비용 정보 — only use if no streaming happened
+        if (data.content && !streamBuffer.trim()) {
+          streamBuffer = data.content;
           updateStreamContent(currentMsgEl, streamBuffer);
         }
         if (data.total_cost) {
