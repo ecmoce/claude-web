@@ -481,11 +481,13 @@
           if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
           const elapsed = ((Date.now() - streamStartTime) / 1000).toFixed(1);
           statusText.textContent = `✍️ 응답 작성 중... (thinking ${elapsed}s)`;
-          // Remove thinking, show msg-content
-          const thinkEl = currentMsgEl?.querySelector('.thinking-status');
-          if (thinkEl) thinkEl.remove();
+          // Remove thinking, move msg-content to end, show it
+          currentMsgEl?.querySelectorAll('.thinking-status').forEach(e => e.remove());
           const mc = currentMsgEl?.querySelector('.msg-content');
-          if (mc) mc.style.display = '';
+          if (mc) {
+            currentMsgEl.appendChild(mc); // move to end (after tool blocks)
+            mc.style.display = '';
+          }
         }
         updateStreamContent(currentMsgEl, streamBuffer);
         scrollToBottom();
@@ -508,10 +510,13 @@
       case 'done':
         isStreaming = false;
         if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
-        // Ensure thinking removed and content visible
+        // Ensure thinking removed and content at bottom, visible
         currentMsgEl?.querySelectorAll('.thinking-status').forEach(e => e.remove());
         const mcDone = currentMsgEl?.querySelector('.msg-content');
-        if (mcDone) mcDone.style.display = '';
+        if (mcDone) {
+          currentMsgEl.appendChild(mcDone);
+          mcDone.style.display = '';
+        }
         updateStreamContent(currentMsgEl, streamBuffer);
         const footer = document.createElement('div');
         footer.className = 'msg-footer';
