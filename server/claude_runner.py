@@ -30,7 +30,7 @@ class ClaudeProcess:
         
     async def start(self, message: str, file_ids: list[str] | None = None, 
                    upload_dir: Path | None = None, search_context: str | None = None,
-                   model: str | None = None):
+                   model: str | None = None, resume_session_id: str | None = None):
         """Claude CLI를 stream-json 모드로 시작"""
         _upload_dir = upload_dir or Path("/tmp")
         full_message = _build_message_with_files(message, file_ids, _upload_dir)
@@ -49,6 +49,10 @@ class ClaudeProcess:
             "--permission-mode", "bypassPermissions",
             "--model", model or CLAUDE_MODEL
         ]
+        
+        # 이전 세션 이어가기
+        if resume_session_id:
+            cmd.extend(["--resume", resume_session_id])
         
         # 이미지 파일 추가
         for img in images:

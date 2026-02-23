@@ -418,10 +418,13 @@
           }
         }
         currentMsgEl = addMessageEl('assistant', '', Date.now());
+        // Thinking indicator — insert BEFORE msg-content so it always appears above
         const ti = document.createElement('div');
         ti.className = 'thinking-status';
         ti.innerHTML = '<div class="thinking-animation"><div class="thinking-icon">🔆</div><span class="thinking-text">Thinking</span><span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="thinking-timer">0s</div>';
-        currentMsgEl.appendChild(ti);
+        const msgContent = currentMsgEl.querySelector('.msg-content');
+        if (msgContent) currentMsgEl.insertBefore(ti, msgContent);
+        else currentMsgEl.appendChild(ti);
         // 경과 시간 타이머
         if (thinkingTimer) clearInterval(thinkingTimer);
         thinkingTimer = setInterval(() => {

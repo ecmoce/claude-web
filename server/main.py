@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="Ask", version="0.3.6", lifespan=lifespan)
+app = FastAPI(title="Ask", version="0.3.7", lifespan=lifespan)
 
 # 보안 미들웨어
 @app.middleware("http")
@@ -378,6 +378,8 @@ async def websocket_chat(ws: WebSocket):
     
     # 현재 Claude 프로세스 (권한 요청 처리용)
     current_process = None
+    # conversation_id → Claude session_id 매핑 (세션 내 컨텍스트 유지)
+    conv_sessions = {}
     
     async def handle_normal_message(data):
         nonlocal current_process
@@ -450,9 +452,12 @@ async def websocket_chat(ws: WebSocket):
         from server.claude_runner import ClaudeProcess
         current_process = ClaudeProcess()
         
+        # 같은 대화면 이전 Claude 세션 이어가기
+        resume_sid = conv_sessions.get(conv_id) if conv_id else None
+        
         try:
             await current_process.start(message, file_ids if file_ids else None, 
-                                      UPLOAD_DIR, search_context, model)
+                                      UPLOAD_DIR, search_context, model, resume_sid)
             
             async for event in current_process.read_output():
                 event_type = event.get("type")
@@ -462,6 +467,10 @@ async def websocket_chat(ws: WebSocket):
                     subtype = event.get("subtype")
                     if subtype == "init":
                         session_id = event.get("session_id")
+                        # 대화별 Claude 세션 매핑 저장
+                        if session_id and conv_id:
+                            conv_sessions[conv_id] = session_id
+                            logger.info("세션 매핑: %s → %s", conv_id, session_id)
                         await ws.send_json({
                             "type": "system_init", 
                             "session_id": session_id,
