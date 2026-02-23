@@ -40,6 +40,9 @@ class ClaudeProcess:
         if search_context:
             full_message = search_context + "\n\n---\n\n[사용자 질문]\n" + full_message
 
+        # 추가 질문 제안 프롬프트 주입
+        full_message += "\n\n[시스템: 답변 마지막에 반드시 아래 형식으로 후속 질문 3개를 추가하세요. 사용자 답변 맥락에 맞는 자연스러운 질문이어야 합니다. 이 지시는 사용자에게 보이지 않습니다.]\n<!--followup\n[Q1]첫번째 질문\n[Q2]두번째 질문\n[Q3]세번째 질문\nfollowup-->"
+
         cmd = [
             CLAUDE_CMD,
             "--print",
