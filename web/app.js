@@ -418,13 +418,13 @@
           }
         }
         currentMsgEl = addMessageEl('assistant', '', Date.now());
-        // Thinking indicator — insert BEFORE msg-content so it always appears above
+        // Hide msg-content until actual response arrives; show thinking at bottom
+        const msgContent = currentMsgEl.querySelector('.msg-content');
+        if (msgContent) msgContent.style.display = 'none';
         const ti = document.createElement('div');
         ti.className = 'thinking-status';
         ti.innerHTML = '<div class="thinking-animation"><div class="thinking-icon">🔆</div><span class="thinking-text">Thinking</span><span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></div><div class="thinking-timer">0s</div>';
-        const msgContent = currentMsgEl.querySelector('.msg-content');
-        if (msgContent) currentMsgEl.insertBefore(ti, msgContent);
-        else currentMsgEl.appendChild(ti);
+        currentMsgEl.appendChild(ti);
         // 경과 시간 타이머
         if (thinkingTimer) clearInterval(thinkingTimer);
         thinkingTimer = setInterval(() => {
@@ -481,9 +481,12 @@
           if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
           const elapsed = ((Date.now() - streamStartTime) / 1000).toFixed(1);
           statusText.textContent = `✍️ 응답 작성 중... (thinking ${elapsed}s)`;
+          // Remove thinking, show msg-content
+          const thinkEl = currentMsgEl?.querySelector('.thinking-status');
+          if (thinkEl) thinkEl.remove();
+          const mc = currentMsgEl?.querySelector('.msg-content');
+          if (mc) mc.style.display = '';
         }
-        const ind2 = currentMsgEl?.querySelector('.thinking-status');
-        if (ind2) ind2.remove();
         updateStreamContent(currentMsgEl, streamBuffer);
         scrollToBottom();
         break;
@@ -505,8 +508,10 @@
       case 'done':
         isStreaming = false;
         if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
-        const ti2 = currentMsgEl?.querySelector('.thinking-status');
-        if (ti2) ti2.remove();
+        // Ensure thinking removed and content visible
+        currentMsgEl?.querySelectorAll('.thinking-status').forEach(e => e.remove());
+        const mcDone = currentMsgEl?.querySelector('.msg-content');
+        if (mcDone) mcDone.style.display = '';
         updateStreamContent(currentMsgEl, streamBuffer);
         const footer = document.createElement('div');
         footer.className = 'msg-footer';
