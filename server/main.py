@@ -23,7 +23,7 @@ from server.models import ChatRequest, ChatResponse, UserInfo, HealthResponse
 from server.rate_limit import check_rate_limit
 from server.claude_runner import run_claude, stream_claude
 from server.web_search import brave_search, format_search_results, deep_research
-from server.database import init_db, close_db, save_conversation, update_conversation_title, get_conversations, delete_conversation, delete_all_conversations, save_message, get_messages, save_attachment, get_attachment, search_conversations
+from server.database import init_db, close_db, save_conversation, update_conversation_title, get_conversations, delete_conversation, delete_all_conversations, save_message, get_messages, save_attachment, get_attachment, search_conversations, save_session_mapping, get_session_mapping
 
 # DEV_MODE — 인증 스킵 (GitHub OAuth Client ID/Secret 없을 때)
 DEV_MODE = os.environ.get("DEV_MODE", "").lower() in ("true", "1", "yes")
@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="Ask", version="0.3.15", lifespan=lifespan)
+app = FastAPI(title="Ask", version="0.3.16", lifespan=lifespan)
 
 # 보안 미들웨어
 @app.middleware("http")
@@ -378,8 +378,7 @@ async def websocket_chat(ws: WebSocket):
     
     # 현재 Claude 프로세스 (권한 요청 처리용)
     current_process = None
-    # conversation_id → Claude session_id 매핑 (세션 내 컨텍스트 유지)
-    conv_sessions = {}
+    # conversation_id → Claude session_id 매핑 (SQLite 영속 저장)
     
     async def handle_normal_message(data):
         nonlocal current_process
@@ -453,7 +452,7 @@ async def websocket_chat(ws: WebSocket):
         current_process = ClaudeProcess()
         
         # 같은 대화면 이전 Claude 세션 이어가기
-        resume_sid = conv_sessions.get(conv_id) if conv_id else None
+        resume_sid = await get_session_mapping(conv_id) if conv_id else None
         
         try:
             await current_process.start(message, file_ids if file_ids else None, 
@@ -469,7 +468,7 @@ async def websocket_chat(ws: WebSocket):
                         session_id = event.get("session_id")
                         # 대화별 Claude 세션 매핑 저장
                         if session_id and conv_id:
-                            conv_sessions[conv_id] = session_id
+                            await save_session_mapping(conv_id, session_id)
                             logger.info("세션 매핑: %s → %s", conv_id, session_id)
                         await ws.send_json({
                             "type": "system_init", 

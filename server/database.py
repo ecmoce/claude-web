@@ -65,6 +65,12 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_attachments_msg ON attachments(message_id);
         CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user);
         CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS conv_sessions (
+            conversation_id TEXT PRIMARY KEY,
+            claude_session_id TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
     """)
 
     # FTS table
@@ -101,6 +107,27 @@ async def close_db():
     if _db:
         await _db.close()
         _db = None
+
+
+# ── Session Mapping (conversation_id → Claude CLI session_id) ──
+
+
+async def save_session_mapping(conversation_id: str, claude_session_id: str):
+    db = await get_db()
+    await db.execute(
+        "INSERT OR REPLACE INTO conv_sessions (conversation_id, claude_session_id, updated_at) VALUES (?, ?, ?)",
+        (conversation_id, claude_session_id, time.time()),
+    )
+    await db.commit()
+
+
+async def get_session_mapping(conversation_id: str) -> str | None:
+    db = await get_db()
+    row = await db.execute_fetchall(
+        "SELECT claude_session_id FROM conv_sessions WHERE conversation_id = ?",
+        (conversation_id,),
+    )
+    return row[0][0] if row else None
 
 
 # ── Conversations ──────────────────────────────────
