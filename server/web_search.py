@@ -107,13 +107,33 @@ def format_search_results(results: list[dict]) -> str:
 
 
 async def fetch_page_text(url: str, max_chars: int = 5000) -> str:
-    """URL에서 텍스트 추출 (간단한 HTML 스트립)."""
+    """URL에서 텍스트 추출 — Scrapling 사용 (안티봇 우회 + 구조화 파싱)."""
+    try:
+        from scrapling.fetchers import Fetcher
+        page = await asyncio.to_thread(
+            Fetcher.get, url, timeout=15, stealthy_headers=True
+        )
+        # 구조화된 텍스트 추출 (script/style 자동 제외)
+        text = page.get_all_text(separator=' ', strip=True) if hasattr(page, 'get_all_text') else ""
+        if not text:
+            # fallback: raw text
+            text = page.text if hasattr(page, 'text') else ""
+        import re
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:max_chars]
+    except Exception as e:
+        logger.warning("Scrapling fetch 실패 %s: %s, httpx fallback", url, e)
+        # fallback to httpx
+        return await _fetch_page_httpx(url, max_chars)
+
+
+async def _fetch_page_httpx(url: str, max_chars: int = 5000) -> str:
+    """httpx fallback — Scrapling 실패 시 사용."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
             resp.raise_for_status()
             text = resp.text
-            # 간단한 태그 제거
             import re
             text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
             text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
@@ -121,7 +141,7 @@ async def fetch_page_text(url: str, max_chars: int = 5000) -> str:
             text = re.sub(r'\s+', ' ', text).strip()
             return text[:max_chars]
     except Exception as e:
-        logger.warning("페이지 fetch 실패 %s: %s", url, e)
+        logger.warning("httpx fallback도 실패 %s: %s", url, e)
         return ""
 
 
