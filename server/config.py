@@ -28,7 +28,7 @@ CLAUDE_CMD = os.environ.get("CLAUDE_CMD", "claude")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
 CLAUDE_TIMEOUT = min(max(int(os.environ.get("CLAUDE_TIMEOUT", "300")), 30), 1800)  # 30s-30m
 MAX_CONCURRENT = min(max(int(os.environ.get("MAX_CONCURRENT", "3")), 1), 10)  # 1-10
-MAX_INPUT_LENGTH = min(max(int(os.environ.get("MAX_INPUT_LENGTH", "10000")), 100), 100000)  # 100-100k
+MAX_INPUT_LENGTH = min(max(int(os.environ.get("MAX_INPUT_LENGTH", "50000")), 100), 100000)  # 100-100k
 
 # Gemini CLI (optional)
 GEMINI_CMD = os.environ.get("GEMINI_CMD", "gemini")

@@ -13,7 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from server.config import HOST, PORT, BASE_URL, CLAUDE_CMD
+from server.config import HOST, PORT, BASE_URL, CLAUDE_CMD, MAX_INPUT_LENGTH
 from server.auth import (
     login_url, exchange_code, create_session_token,
     get_current_user, set_session_cookie, clear_session_cookie,
@@ -394,8 +394,8 @@ async def websocket_chat(ws: WebSocket):
             await ws.send_json({"type": "error", "content": "Empty message"})
             return
 
-        if len(message) > 10000:
-            await ws.send_json({"type": "error", "content": "Message too long (max 10000)"})
+        if len(message) > MAX_INPUT_LENGTH:
+            await ws.send_json({"type": "error", "content": f"Message too long (max {MAX_INPUT_LENGTH})"})
             return
 
         # file_ids 검증
