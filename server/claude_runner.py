@@ -41,9 +41,9 @@ class ClaudeProcess:
             full_message = search_context + "\n\n---\n\n[사용자 질문]\n" + full_message
 
         FOLLOWUP_SYSTEM_PROMPT = (
-            "답변 마지막에 반드시 아래 형식으로 후속 질문 3개를 추가하세요. "
-            "사용자 답변 맥락에 맞는 자연스러운 질문이어야 합니다.\n"
-            "<!--followup\n[Q1]첫번째 질문\n[Q2]두번째 질문\n[Q3]세번째 질문\nfollowup-->"
+            "답변 마지막에 반드시 아래 형식으로 후속 제안 3개를 추가하세요. "
+            "질문이 아닌 요청/지시 형태로 작성하세요 (예: '~해줘', '~알려줘', '~비교해줘').\n"
+            "<!--followup\n[Q1]첫번째 제안\n[Q2]두번째 제안\n[Q3]세번째 제안\nfollowup-->"
         )
 
         cmd = [
