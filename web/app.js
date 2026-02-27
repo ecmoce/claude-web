@@ -848,10 +848,7 @@
     updateSendState();
     charCount.textContent = input.value.length.toLocaleString();
   });
-  let isComposing = false;
-  input.addEventListener('compositionstart', () => { isComposing = true; });
-  input.addEventListener('compositionend', () => { isComposing = false; });
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !isComposing) { e.preventDefault(); sendMessage(); } });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendMessage(); } });
   sendBtn.addEventListener('click', () => sendMessage());
 
   $('new-chat-btn').addEventListener('click', () => { createConversation(); });
