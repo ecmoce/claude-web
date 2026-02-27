@@ -130,7 +130,7 @@ async def health():
     except Exception:
         claude_available = False
     
-    return HealthResponse(claude_available=claude_available)
+    return HealthResponse(version=app.version, claude_available=claude_available)
 
 
 @app.get("/api/providers")
