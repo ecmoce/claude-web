@@ -512,6 +512,12 @@ async def websocket_chat(ws: WebSocket):
                                 "description": tool_input.get("description", "")
                             })
                         
+                        elif content_item.get("type") == "thinking":
+                            # Thinking 과정 (extended thinking)
+                            thinking_text = content_item.get("thinking", "")
+                            if thinking_text:
+                                await ws.send_json({"type": "thinking", "content": thinking_text})
+                        
                         elif content_item.get("type") == "text":
                             # 일반 텍스트 응답
                             text = content_item.get("text", "")

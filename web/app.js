@@ -522,6 +522,26 @@
         statusText.textContent = '🔐 권한 요청 대기 중...';
         break;
         
+      case 'thinking':
+        // Extended thinking 과정 표시
+        if (currentMsgEl) {
+          let thinkBox = currentMsgEl.querySelector('.thinking-content');
+          if (!thinkBox) {
+            thinkBox = document.createElement('details');
+            thinkBox.className = 'thinking-content';
+            thinkBox.open = true;
+            thinkBox.innerHTML = '<summary>💭 Thinking...</summary><pre class="thinking-pre"></pre>';
+            // thinking-status 앞에 삽입
+            const ts = currentMsgEl.querySelector('.thinking-status');
+            if (ts) currentMsgEl.insertBefore(thinkBox, ts);
+            else currentMsgEl.appendChild(thinkBox);
+          }
+          const pre = thinkBox.querySelector('.thinking-pre');
+          if (pre) { pre.textContent += data.content; }
+          scrollToBottom();
+        }
+        break;
+
       case 'chunk':
         streamBuffer += data.content;
         if (!firstChunkReceived) {
@@ -529,8 +549,10 @@
           if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
           const elapsed = ((Date.now() - streamStartTime) / 1000).toFixed(1);
           statusText.textContent = `✍️ 응답 작성 중... (thinking ${elapsed}s)`;
-          // Remove thinking, move msg-content to end, show it
+          // Remove thinking indicator, collapse thinking content
           currentMsgEl?.querySelectorAll('.thinking-status').forEach(e => e.remove());
+          const thinkDetails = currentMsgEl?.querySelector('.thinking-content');
+          if (thinkDetails) thinkDetails.open = false;
           const mc = currentMsgEl?.querySelector('.msg-content');
           if (mc) {
             currentMsgEl.appendChild(mc); // move to end (after tool blocks)
