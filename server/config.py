@@ -29,6 +29,9 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
 CLAUDE_TIMEOUT = min(max(int(os.environ.get("CLAUDE_TIMEOUT", "300")), 30), 1800)  # 30s-30m
 MAX_CONCURRENT = min(max(int(os.environ.get("MAX_CONCURRENT", "3")), 1), 10)  # 1-10
 MAX_INPUT_LENGTH = min(max(int(os.environ.get("MAX_INPUT_LENGTH", "50000")), 100), 100000)  # 100-100k
+# Auto-compact: 대화가 이 턴 수 이상이면 --resume 대신 새 세션 + 최근 컨텍스트 주입
+AUTO_COMPACT_THRESHOLD = int(os.environ.get("AUTO_COMPACT_THRESHOLD", "20"))
+CONTEXT_MESSAGES = int(os.environ.get("CONTEXT_MESSAGES", "10"))
 
 # Gemini CLI (optional)
 GEMINI_CMD = os.environ.get("GEMINI_CMD", "gemini")

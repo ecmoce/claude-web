@@ -409,6 +409,7 @@
     ws.onopen = () => {
       connIndicator.classList.add('connected'); connText.textContent = '연결됨';
       wsRetryDelay = 1000;
+      updateSendState();
       if (wsPingInterval) clearInterval(wsPingInterval);
       wsPingInterval = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -425,6 +426,12 @@
         connText.textContent = '인증 만료';
         showLogin();
         return;
+      }
+      // 스트리밍 중 연결 끊김 → 입력 복구
+      if (isStreaming) {
+        isStreaming = false;
+        if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
+        statusText.textContent = '⚠️ 연결 끊김 — 재연결 시도 중...';
       }
       connText.textContent = '재연결 중...';
       scheduleReconnect();
@@ -584,7 +591,12 @@
         isStreaming = false;
         if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
         if (data.content === 'Not authenticated') return; // 4001 close에서 처리
-        showToast(data.content);
+        // 타임아웃 관련 에러에 안내 추가
+        let errorMsg = data.content;
+        if (/timeout|timed?\s*out/i.test(errorMsg)) {
+          errorMsg += ' — 대화가 길어져서 느려졌습니다. 새 대화를 시작해 보세요.';
+        }
+        showToast(errorMsg);
         statusText.textContent = '❌ 오류';
         updateSendState();
         break;

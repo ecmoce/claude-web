@@ -253,6 +253,37 @@ async def get_attachment(att_id: str) -> dict | None:
 # ── Search ─────────────────────────────────────────
 
 
+async def get_message_count(conversation_id: str) -> int:
+    """대화의 메시지 수 반환."""
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT COUNT(*) FROM messages WHERE conversation_id = ?",
+        (conversation_id,),
+    )
+    return rows[0][0] if rows else 0
+
+
+async def get_recent_messages(conversation_id: str, limit: int = 10) -> list[dict]:
+    """대화의 최근 N개 메시지 반환."""
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?",
+        (conversation_id, limit),
+    )
+    # DESC로 가져왔으므로 역순으로 반환 (시간순)
+    return [dict(r) for r in reversed(rows)]
+
+
+async def delete_session_mapping(conversation_id: str):
+    """대화의 세션 매핑 삭제."""
+    db = await get_db()
+    await db.execute(
+        "DELETE FROM conv_sessions WHERE conversation_id = ?",
+        (conversation_id,),
+    )
+    await db.commit()
+
+
 async def search_conversations(user: str, query: str) -> list[dict]:
     """FTS로 메시지 내용 검색, 대화 단위로 그룹핑."""
     db = await get_db()

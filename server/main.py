@@ -13,7 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from server.config import HOST, PORT, BASE_URL, CLAUDE_CMD, MAX_INPUT_LENGTH
+from server.config import HOST, PORT, BASE_URL, CLAUDE_CMD, MAX_INPUT_LENGTH, AUTO_COMPACT_THRESHOLD, CONTEXT_MESSAGES
 from server.auth import (
     login_url, exchange_code, create_session_token,
     get_current_user, set_session_cookie, clear_session_cookie,
@@ -23,7 +23,7 @@ from server.models import ChatRequest, ChatResponse, UserInfo, HealthResponse
 from server.rate_limit import check_rate_limit
 from server.claude_runner import run_claude, stream_claude
 from server.web_search import brave_search, format_search_results, deep_research
-from server.database import init_db, close_db, save_conversation, update_conversation_title, get_conversations, delete_conversation, delete_all_conversations, save_message, get_messages, save_attachment, get_attachment, search_conversations, save_session_mapping, get_session_mapping
+from server.database import init_db, close_db, save_conversation, update_conversation_title, get_conversations, delete_conversation, delete_all_conversations, save_message, get_messages, save_attachment, get_attachment, search_conversations, save_session_mapping, get_session_mapping, get_message_count, get_recent_messages, delete_session_mapping
 
 # DEV_MODE — 인증 스킵 (GitHub OAuth Client ID/Secret 없을 때)
 DEV_MODE = os.environ.get("DEV_MODE", "").lower() in ("true", "1", "yes")
@@ -453,6 +453,22 @@ async def websocket_chat(ws: WebSocket):
         
         # 같은 대화면 이전 Claude 세션 이어가기
         resume_sid = await get_session_mapping(conv_id) if conv_id else None
+        
+        # Auto-compact: 대화가 길어지면 새 세션 + 컨텍스트 주입
+        if resume_sid and conv_id:
+            msg_count = await get_message_count(conv_id)
+            if msg_count > AUTO_COMPACT_THRESHOLD:
+                logger.info("Auto-compact 발동: conv=%s, msgs=%d (threshold=%d)", conv_id, msg_count, AUTO_COMPACT_THRESHOLD)
+                resume_sid = None  # 새 세션으로 시작
+                recent = await get_recent_messages(conv_id, CONTEXT_MESSAGES)
+                context_lines = []
+                for m in recent:
+                    role_label = "사용자" if m["role"] == "user" else "어시스턴트"
+                    content_preview = m["content"][:200] + ("..." if len(m["content"]) > 200 else "")
+                    context_lines.append(f"[{role_label}] {content_preview}")
+                context_block = "\n".join(context_lines)
+                message = f"[이전 대화 컨텍스트]\n{context_block}\n\n[현재 질문]\n{message}"
+                await ws.send_json({"type": "status", "content": "📋 대화 컨텍스트 정리 중..."})
         
         try:
             await current_process.start(message, file_ids if file_ids else None, 
