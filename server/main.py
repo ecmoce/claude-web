@@ -522,7 +522,7 @@ async def websocket_chat(ws: WebSocket):
                             # 일반 텍스트 응답
                             text = content_item.get("text", "")
                             full_response.append(text)
-                            logger.info("Sending chunk: %d chars", len(text))
+                            logger.debug("Sending chunk: %d chars", len(text))
                             await ws.send_json({"type": "chunk", "content": text})
                 
                 elif event_type == "user":
