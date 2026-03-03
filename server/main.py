@@ -570,7 +570,10 @@ async def websocket_chat(ws: WebSocket):
 
         except Exception as e:
             logger.error("Claude stream 에러: %s", e)
-            await ws.send_json({"type": "error", "content": str(e)})
+            try:
+                await ws.send_json({"type": "error", "content": str(e) or "Unknown error"})
+            except Exception:
+                logger.warning("WS 이미 닫힘 — 에러 전송 실패")
         finally:
             if current_process:
                 await current_process.close()

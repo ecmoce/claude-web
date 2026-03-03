@@ -567,6 +567,9 @@
         // 최종 결과 및 비용 정보 — only use if no streaming happened
         if (data.content && !streamBuffer.trim()) {
           streamBuffer = data.content;
+          const mcFinal = currentMsgEl?.querySelector('.msg-content');
+          if (mcFinal) { mcFinal.style.display = ''; currentMsgEl.appendChild(mcFinal); }
+          currentMsgEl?.querySelectorAll('.thinking-status').forEach(e => e.remove());
           updateStreamContent(currentMsgEl, streamBuffer);
         }
         if (data.total_cost) {
