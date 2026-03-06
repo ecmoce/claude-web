@@ -780,3 +780,37 @@ pre:hover .copy-btn { opacity: 1; }
 }
 .ask-submit-btn:hover { opacity: 0.85; }
 .ask-submit-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Tool-specific styles */
+.todo-list {
+  padding: 4px 0;
+}
+.todo-item {
+  padding: 3px 0;
+  font-size: 13px;
+}
+.tool-search, .tool-fetch, .tool-plan, .tool-internal {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+.tool-fetch a {
+  color: var(--accent, #6366f1);
+  text-decoration: none;
+}
+.tool-fetch a:hover {
+  text-decoration: underline;
+}
+.tool-internal-header {
+  opacity: 0.6;
+  font-size: 12px;
+}
+.tool-result details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.tool-result details summary code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

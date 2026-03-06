@@ -670,14 +670,37 @@
     const description = toolData.description || '';
     
     let toolDetails = '';
+    const filePath = toolInput.file_path || toolInput.path || '';
     if (toolName === 'Bash') {
       toolDetails = `<div class="tool-command">$ ${escapeHtml(toolInput.command || '')}</div>`;
-    } else if (toolName === 'Write' || toolName === 'Edit') {
-      const filePath = toolInput.file_path || toolInput.path || '';
+    } else if (toolName === 'Write') {
       toolDetails = `<div class="tool-file">📝 ${escapeHtml(filePath)}</div>`;
+    } else if (toolName === 'Edit') {
+      toolDetails = `<div class="tool-file">✏️ ${escapeHtml(filePath)}</div>`;
     } else if (toolName === 'Read') {
-      const filePath = toolInput.file_path || toolInput.path || '';
       toolDetails = `<div class="tool-file">👁 ${escapeHtml(filePath)}</div>`;
+    } else if (toolName === 'TodoWrite') {
+      const todos = toolInput.todos || [];
+      const todoHtml = todos.map(t => {
+        const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '🔄' : '⬜';
+        return `<div class="todo-item">${icon} ${escapeHtml(t.content || '')}</div>`;
+      }).join('');
+      toolDetails = `<div class="todo-list">${todoHtml || '(빈 목록)'}</div>`;
+    } else if (toolName === 'WebSearch') {
+      toolDetails = `<div class="tool-search">🔍 ${escapeHtml(toolInput.query || '')}</div>`;
+    } else if (toolName === 'WebFetch') {
+      const url = toolInput.url || '';
+      toolDetails = `<div class="tool-fetch">🌐 <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url.length > 60 ? url.slice(0, 60) + '...' : url)}</a></div>`;
+    } else if (toolName === 'Grep') {
+      toolDetails = `<div class="tool-search">🔎 <code>${escapeHtml(toolInput.pattern || '')}</code> in ${escapeHtml(toolInput.path || '.')}</div>`;
+    } else if (toolName === 'Glob') {
+      toolDetails = `<div class="tool-search">📂 ${escapeHtml(toolInput.pattern || '')}</div>`;
+    } else if (toolName === 'ToolSearch') {
+      toolDetails = `<div class="tool-internal">🔗 ${escapeHtml(toolInput.query || '')}</div>`;
+    } else if (toolName === 'EnterPlanMode') {
+      toolDetails = `<div class="tool-plan">📋 계획 모드 진입</div>`;
+    } else if (toolName === 'ExitPlanMode') {
+      toolDetails = `<div class="tool-plan">📋 계획 모드 종료</div>`;
     } else if (toolName === 'AskUserQuestion') {
       const toolUseId = toolData.tool_use_id;
       const questions = toolInput.questions || [];
@@ -711,9 +734,19 @@
       toolDetails = `<div class="tool-generic">${escapeHtml(JSON.stringify(toolInput))}</div>`;
     }
     
+    const toolIcons = {
+      Bash: '💻', Read: '👁', Write: '📝', Edit: '✏️', TodoWrite: '📋',
+      WebSearch: '🔍', WebFetch: '🌐', Grep: '🔎', Glob: '📂',
+      ToolSearch: '🔗', EnterPlanMode: '📋', ExitPlanMode: '📋',
+      AskUserQuestion: '❓', NotebookEdit: '📓',
+    };
+    const icon = toolIcons[toolName] || '🔧';
+    // ToolSearch는 접어서 표시
+    const isInternal = toolName === 'ToolSearch';
+
     toolBlock.innerHTML = `
-      <div class="tool-header">
-        <span class="tool-icon">🔧</span>
+      <div class="tool-header ${isInternal ? 'tool-internal-header' : ''}">
+        <span class="tool-icon">${icon}</span>
         <span class="tool-name">${escapeHtml(toolName)}</span>
         <span class="tool-status">실행 중...</span>
       </div>
@@ -746,7 +779,15 @@
     if (resultArea && content) {
       const resultDiv = document.createElement('div');
       resultDiv.className = `tool-result ${isError ? 'error' : 'success'}`;
-      resultDiv.innerHTML = `<pre><code>${escapeHtml(content)}</code></pre>`;
+      // 긴 결과는 접어서 표시
+      const maxPreview = 500;
+      const isLong = content.length > maxPreview;
+      const preview = isLong ? content.slice(0, maxPreview) + '...' : content;
+      if (isLong) {
+        resultDiv.innerHTML = `<details><summary><code>${escapeHtml(preview)}</code></summary><pre><code>${escapeHtml(content)}</code></pre></details>`;
+      } else {
+        resultDiv.innerHTML = `<pre><code>${escapeHtml(content)}</code></pre>`;
+      }
       resultArea.appendChild(resultDiv);
     }
   }
