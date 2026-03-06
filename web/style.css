@@ -707,3 +707,35 @@ pre:hover .copy-btn { opacity: 1; }
   max-height: 300px;
   overflow-y: auto;
 }
+
+/* AskUserQuestion 도구 UI */
+.ask-user-block {
+  padding: 8px 0;
+}
+.ask-question {
+  margin-bottom: 8px;
+}
+.ask-header {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+.ask-text {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.ask-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ask-option {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-secondary);
+}

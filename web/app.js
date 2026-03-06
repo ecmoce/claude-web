@@ -649,6 +649,20 @@
     } else if (toolName === 'Read') {
       const filePath = toolInput.file_path || toolInput.path || '';
       toolDetails = `<div class="tool-file">👁 ${escapeHtml(filePath)}</div>`;
+    } else if (toolName === 'AskUserQuestion') {
+      const questions = toolInput.questions || [];
+      const qHtml = questions.map(q => {
+        const header = q.header ? `<div class="ask-header">${escapeHtml(q.header)}</div>` : '';
+        const opts = (q.options || []).map(o => 
+          `<div class="ask-option">${escapeHtml(o.label || o.value || '')}</div>`
+        ).join('');
+        return `<div class="ask-question">
+          ${header}
+          <div class="ask-text">❓ ${escapeHtml(q.question || '')}</div>
+          ${opts ? `<div class="ask-options">${opts}</div>` : ''}
+        </div>`;
+      }).join('');
+      toolDetails = `<div class="ask-user-block">${qHtml}</div>`;
     } else {
       toolDetails = `<div class="tool-generic">${escapeHtml(JSON.stringify(toolInput))}</div>`;
     }
