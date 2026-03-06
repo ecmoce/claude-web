@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="Ask", version="0.3.23", lifespan=lifespan)
+app = FastAPI(title="Ask", version="0.3.24", lifespan=lifespan)
 
 # 보안 미들웨어
 @app.middleware("http")
@@ -615,6 +615,29 @@ async def websocket_chat(ws: WebSocket):
                     logger.warning("current_process가 None입니다. 권한 응답을 처리할 수 없습니다.")
                 continue
             
+            # AskUserQuestion 답변 처리
+            if data.get("type") == "ask_answer":
+                if current_process:
+                    tool_use_id = data.get("tool_use_id")
+                    answer = data.get("answer", "")
+                    logger.info("AskUserQuestion 답변: %s -> %s", tool_use_id, answer[:50])
+                    # tool_result로 답변 전송
+                    response = {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_use_id,
+                                    "content": answer
+                                }
+                            ]
+                        }
+                    }
+                    await current_process._write_json(response)
+                continue
+
             # 슬래시 명령어 처리
             if data.get("type") == "slash_command":
                 command = data.get("command", "").strip()

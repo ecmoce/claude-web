@@ -389,6 +389,35 @@
   function renderMarkdown(text) { try { return marked.parse(text); } catch { return escapeHtml(text); } }
   function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
   function scrollToBottom() { requestAnimationFrame(() => { messagesWrap.scrollTop = messagesWrap.scrollHeight; }); }
+
+  // AskUserQuestion 답변 전송
+  window._submitAskAnswer = function(toolUseId) {
+    const block = document.querySelector(`.ask-user-block[data-tool-use-id="${toolUseId}"]`);
+    if (!block) return;
+    const answers = [];
+    block.querySelectorAll('.ask-question').forEach(q => {
+      const qi = q.dataset.qi;
+      // 체크박스/라디오 선택값
+      const checked = q.querySelectorAll('.ask-input:checked');
+      if (checked.length) {
+        answers.push(Array.from(checked).map(c => c.value).join(', '));
+      }
+      // 자유 입력
+      const free = q.querySelector('.ask-free-input');
+      if (free && free.value.trim()) {
+        answers.push(free.value.trim());
+      }
+    });
+    const answer = answers.join('\n') || '(답변 없음)';
+    // WS로 전송
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'ask_answer', tool_use_id: toolUseId, answer }));
+    }
+    // UI 업데이트
+    const btn = block.querySelector('.ask-submit-btn');
+    if (btn) { btn.textContent = '✅ 답변 전송됨'; btn.disabled = true; }
+    block.querySelectorAll('.ask-input, .ask-free-input').forEach(el => el.disabled = true);
+  };
   function showToast(msg) {
     const t = document.createElement('div'); t.className = 'error-toast'; t.textContent = msg;
     document.body.appendChild(t); setTimeout(() => t.remove(), 3500);
@@ -650,19 +679,34 @@
       const filePath = toolInput.file_path || toolInput.path || '';
       toolDetails = `<div class="tool-file">👁 ${escapeHtml(filePath)}</div>`;
     } else if (toolName === 'AskUserQuestion') {
+      const toolUseId = toolData.tool_use_id;
       const questions = toolInput.questions || [];
-      const qHtml = questions.map(q => {
+      const qHtml = questions.map((q, qi) => {
         const header = q.header ? `<div class="ask-header">${escapeHtml(q.header)}</div>` : '';
-        const opts = (q.options || []).map(o => 
-          `<div class="ask-option">${escapeHtml(o.label || o.value || '')}</div>`
-        ).join('');
-        return `<div class="ask-question">
+        const multi = q.multiSelect !== false;
+        const inputType = multi ? 'checkbox' : 'radio';
+        const opts = (q.options || []).map((o, oi) => {
+          const label = o.label || o.value || '';
+          const value = o.value || o.label || '';
+          return `<label class="ask-option-label">
+            <input type="${inputType}" name="ask_q${qi}" value="${escapeHtml(value)}" class="ask-input" data-qi="${qi}">
+            <span>${escapeHtml(label)}</span>
+          </label>`;
+        }).join('');
+        const freeInput = !q.options?.length ? `<input type="text" class="ask-free-input" data-qi="${qi}" placeholder="답변을 입력하세요...">` : '';
+        return `<div class="ask-question" data-qi="${qi}">
           ${header}
           <div class="ask-text">❓ ${escapeHtml(q.question || '')}</div>
-          ${opts ? `<div class="ask-options">${opts}</div>` : ''}
+          ${opts ? `<div class="ask-options-interactive">${opts}</div>` : ''}
+          ${freeInput}
         </div>`;
       }).join('');
-      toolDetails = `<div class="ask-user-block">${qHtml}</div>`;
+      toolDetails = `<div class="ask-user-block" data-tool-use-id="${toolUseId}">
+        ${qHtml}
+        <button class="ask-submit-btn" onclick="window._submitAskAnswer('${toolUseId}')">답변 전송</button>
+      </div>`;
+      // Mark this tool as needing user input
+      toolBlock = null; // will be set below
     } else {
       toolDetails = `<div class="tool-generic">${escapeHtml(JSON.stringify(toolInput))}</div>`;
     }
@@ -689,8 +733,14 @@
     const resultArea = toolBlock.querySelector('.tool-result-area');
     
     if (status) {
-      status.textContent = isError ? '실행 실패' : '실행 완료';
-      status.className = `tool-status ${isError ? 'error' : 'success'}`;
+      // Plan mode exit, AskUserQuestion 등은 is_error=true지만 실제 에러가 아님
+      const toolName = toolBlock.querySelector('.tool-name')?.textContent || '';
+      const isRealError = isError && !['EnterPlanMode', 'ExitPlanMode', 'AskUserQuestion', 'ToolSearch'].includes(toolName)
+        && !/^Exit plan mode/i.test(content);
+      status.textContent = isRealError ? '실행 실패' : '실행 완료';
+      status.className = `tool-status ${isRealError ? 'error' : 'success'}`;
+      // Override isError for result display
+      isError = isRealError;
     }
     
     if (resultArea && content) {
